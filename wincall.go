@@ -15,9 +15,10 @@
 // limitations under the License.
 
 package wincoe
+
 import (
-"errors"
-"fmt"
+	"errors"
+	"fmt"
 
 	"golang.org/x/sys/windows"
 )
@@ -25,39 +26,39 @@ import (
 type WinCheckFunc func(r1 uintptr) bool
 
 var (
-    CheckBool   WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
-    CheckHandle WinCheckFunc = func(r1 uintptr) bool { return r1 == ^uintptr(0) }
+	CheckBool   WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
+	CheckHandle WinCheckFunc = func(r1 uintptr) bool { return r1 == ^uintptr(0) }
 )
 
 // WinCall processes a Windows API result.
 // It returns nil on success (when isFailure is false).
 // On failure, it returns a wrapped error.
 func WinCall(
-    isFailure WinCheckFunc,
-    onFail func(err error), 
-    r1, r2 uintptr,
-    callErr error,
+	isFailure WinCheckFunc,
+	onFail func(err error),
+	r1, r2 uintptr,
+	callErr error,
 ) (uintptr, uintptr, error) {
 
-    if isFailure(r1) {
-        var finalErr error
-        
-        // If the system says failure but the error code is 0/nil,
-        // we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
-        if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
-            finalErr = fmt.Errorf("system reported failure (ret=%d) but LastError was 0", r1)
-        } else {
-            // We only use %w when there is a REAL error to wrap.
-            finalErr = fmt.Errorf("WinCall failed: %w", callErr)
-        }
+	if isFailure(r1) {
+		var finalErr error
 
-        if onFail != nil {
-            onFail(finalErr)
-        }
+		// If the system says failure but the error code is 0/nil,
+		// we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
+		if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
+			finalErr = fmt.Errorf("system reported failure (ret=%d) but LastError was 0", r1)
+		} else {
+			// We only use %w when there is a REAL error to wrap.
+			finalErr = fmt.Errorf("WinCall failed: %w", callErr)
+		}
 
-        return r1, r2, finalErr
-    }
+		if onFail != nil {
+			onFail(finalErr)
+		}
 
-    // Success: return nil so 'if err != nil' behaves normally.
-    return r1, r2, nil
+		return r1, r2, finalErr
+	}
+
+	// Success: return nil so 'if err != nil' behaves normally.
+	return r1, r2, nil
 }

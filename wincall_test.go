@@ -17,7 +17,7 @@
 package wincoe
 
 import (
-"errors"
+	"errors"
 	"testing"
 
 	"golang.org/x/sys/windows"
