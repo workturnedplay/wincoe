@@ -75,26 +75,17 @@ if "!COMPARE_RESULT!"=="0" (
 )
 
 :: 5. Update and Sync (Standard workflow)
-echo [1/4] Updating all dependencies...
+echo [1/4] Updating all dependencies... needs internet access to check if new versions are available.
 go get -u ./...
-if !errorlevel! neq 0 (set "stage=Dependencies Update" & goto :failed)
+if !errorlevel! neq 0 (set "stage=Dependencies Update (needs internet access)" & goto :failed)
 
 echo [2/4] Cleaning up go.mod...
 go mod tidy
 if !errorlevel! neq 0 (set "stage=Tidy" & goto :failed)
 
-if exist vendor (
-    echo [3/4] Cleaning old vendor files...
-    rd /s /q vendor
-    if exist vendor (
-        set "stage=Vendor Cleanup (Directory might be locked by another process)"
-        goto :failed
-    )
-) else (
-    echo [3/4] No vendor folder found, skipping cleanup...
-)
+echo [3/4] Not deleting vendor folder.
 
-echo [4/4] Creating fresh vendor folder...
+echo [4/4] Updating vendor folder...
 go mod vendor
 if !errorlevel! neq 0 (set "stage=Creating and populating 'vendor' dir" & goto :failed)
 
