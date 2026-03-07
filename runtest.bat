@@ -1,4 +1,14 @@
 @echo off
+setlocal enabledelayedexpansion
+
+:: Use vendor ONLY if we are NOT in a workspace
+set "MOD_FLAG=-mod=vendor"
+if exist "..\go.work" (
+set "MOD_FLAG="
+echo Running unvendored
+) else (
+echo Running vendored
+)
 
 ::if running as admin must get back to current dir:
 cd /d %~dp0
@@ -15,52 +25,24 @@ echo Running go vet...
 :: Including dead branches
 :: Including code not exercised by tests
 ::go vet -mod=vendor ./...
-go vet -mod=vendor -unsafeptr=false
+::go vet -mod=vendor -unsafeptr=false
+go vet !MOD_FLAG! -unsafeptr=false ./...
 if errorlevel 1 goto :fail
 
-go build -mod=vendor .
+echo Running go build
+go build !MOD_FLAG! .
 if errorlevel 1 goto :fail
 
-go test -mod=vendor -v
+echo Running go test
+go test !MOD_FLAG! -v
 if errorlevel 1 goto :fail
-::pause
 
-::When you build with: -ldflags "-H=windowsgui"
-::your binary is linked as a GUI subsystem executable (/SUBSYSTEM:WINDOWS), not a console subsystem one.
-::Consequences:
-::• No console is allocated
-::• stdout, stderr, and stdin do not exist
-::• panic, fmt.Println, log.Fatal, etc. have nowhere to write
-::• Windows shows nothing unless you explicitly create UI or log to disk
-
-::Without -H=windowsgui (default):
-::• Subsystem: Console
-::• A console window is attached or created
-::• fmt.Println, panic, logging all work
-::• On launch, a black console window appears
-::• Required for CLI tools or debugging
-::
-::With -H=windowsgui:
-::
-::• Subsystem: Windows GUI
-::• No console window
-::• Silent unless you implement logging or UI
-::• Correct for tray apps, background tools, shell helpers
-::• Required if you want “invisible” behavior
-::
-::Nothing else changes.
-::No runtime behavior differences.
-::No threading differences.
-::No input differences.
-::
-::This flag affects only how Windows initializes the process.
-
-echo Build succeeded.
+echo all succeeded.
 pause
 goto :eof
 
 :fail
 echo.
-echo *** BUILD FAILED ***
+echo *** something FAILED ***
 pause
 exit /b 1
