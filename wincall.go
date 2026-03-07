@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package wincoe aka winco(r)e, are common functions I use across my projects do keep things DRY.
 package wincoe
 
 import (
@@ -23,10 +24,18 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// WinCheckFunc defines a predicate used to determine if a Windows API call failed
+// based on its primary return value (r1).
 type WinCheckFunc func(r1 uintptr) bool
 
 var (
-	CheckBool   WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
+	// CheckBool identifies a failure for functions returning a BOOL or HRESULT.
+	// In the Windows API, a 0 (FALSE) typically indicates that the function failed.
+	CheckBool WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
+
+	// CheckHandle identifies a failure for functions returning a HANDLE.
+	// Many Windows APIs return INVALID_HANDLE_VALUE (all bits set to 1) on failure.
+	// ^uintptr(0) is the Go-idiomatic way to represent -1 as an unsigned pointer.
 	CheckHandle WinCheckFunc = func(r1 uintptr) bool { return r1 == ^uintptr(0) }
 )
 
@@ -39,7 +48,6 @@ func WinCall(
 	r1, r2 uintptr,
 	callErr error,
 ) (uintptr, uintptr, error) {
-
 	if isFailure(r1) {
 		var finalErr error
 
