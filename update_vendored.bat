@@ -74,6 +74,35 @@ if "!COMPARE_RESULT!"=="0" (
     )
 )
 
+:: 4.5 Robustly update go.work in the parent directory
+if exist "..\go.work" (
+    set "WORK_VER="
+    :: Find the line starting with "go " in the parent go.work
+    for /f "tokens=2" %%v in ('findstr /b "go " ..\go.work') do set "WORK_VER=%%v"
+
+    if "!WORK_VER!"=="" (
+        echo [!] WARNING: go.work found but no 'go' version line detected. Skipping.
+    ) else (
+        :: Validate the version string found in go.work
+        set "CHECK_TARGET=!WORK_VER!"
+        call :ValidateVersion
+        if !errorlevel! neq 0 (set "stage=go.work Version Validation" & goto :failed)
+
+        :: Compare: Is Installed > go.work?
+        powershell -command "$v1 = '!INSTALLED_VER!'.Split('-')[0]; $v2 = '!WORK_VER!'.Split('-')[0]; if ([version]$v1 -gt [version]$v2) { exit 0 } else { exit 1 }" >nul 2>&1
+        
+        if !errorlevel! equ 0 (
+            echo [0.5/4] Bumping parent go.work from !WORK_VER! to !INSTALLED_VER!...
+            pushd ..
+            go work edit -go=!INSTALLED_VER!
+            popd
+            if !errorlevel! neq 0 (set "stage=go.work Version Bump execution" & goto :failed)
+        ) else (
+            echo [0.5/4] Workspace version !WORK_VER! is already up to date.
+        )
+    )
+)
+
 :: 5. Update and Sync (Standard workflow)
 echo [1/4] Updating all dependencies... needs internet access to check if new versions are available.
 go get -u ./...
