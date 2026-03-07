@@ -80,6 +80,30 @@ func TestWinCall(t *testing.T) {
 			wantErr:     true,
 			expectIsErr: windows.ERROR_INVALID_HANDLE,
 		},
+
+		{
+			name:        "Null Pointer Failure (r1=0)",
+			isFailure:   CheckNull,
+			r1:          0,
+			callErr:     windows.ERROR_OUTOFMEMORY,
+			wantErr:     true,
+			expectIsErr: windows.ERROR_OUTOFMEMORY,
+		},
+
+		{
+			name:      "HRESULT Failure (E_FAIL)",
+			isFailure: CheckHRESULT,
+			r1:        uintptr(0x80004005), // Represents -2147467259 in int32
+			callErr:   nil,
+			wantErr:   true,
+		},
+		{
+			name:      "HRESULT Success (S_OK)",
+			isFailure: CheckHRESULT,
+			r1:        0,
+			callErr:   nil,
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {

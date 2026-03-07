@@ -29,14 +29,23 @@ import (
 type WinCheckFunc func(r1 uintptr) bool
 
 var (
-	// CheckBool identifies a failure for functions returning a BOOL or HRESULT.
-	// In the Windows API, a 0 (FALSE) typically indicates that the function failed.
+	// CheckBool identifies a failure for functions returning a Windows BOOL.
+	// In the Windows API, a 0 (FALSE) indicates that the function failed.
 	CheckBool WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
 
 	// CheckHandle identifies a failure for functions returning a HANDLE.
 	// Many Windows APIs return INVALID_HANDLE_VALUE (all bits set to 1) on failure.
 	// ^uintptr(0) is the Go-idiomatic way to represent -1 as an unsigned pointer.
 	CheckHandle WinCheckFunc = func(r1 uintptr) bool { return r1 == ^uintptr(0) }
+
+	// CheckNull identifies a failure for functions returning a pointer or a handle
+	// where a NULL value (0) indicates the operation could not be completed.
+	CheckNull WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
+
+	// CheckHRESULT identifies a failure for functions that return an HRESULT.
+	// An HRESULT is a 32-bit value where a negative number (high bit set)
+	// indicates an error, while 0 or positive values indicate success.
+	CheckHRESULT WinCheckFunc = func(r1 uintptr) bool { return int32(r1) < 0 }
 )
 
 // WinCall processes a Windows API result.
