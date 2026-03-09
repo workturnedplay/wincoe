@@ -6,6 +6,7 @@ Originally located here: https://github.com/workturnedplay/wincoe
 
 `wincoe` is a small lib that I use in some of my projects on win11.  
 The name comes from `wincore` but lack the `r`.  
+Made with AI assistance.  
 
 ---
 
