@@ -108,25 +108,19 @@ func TestWinCall(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			callbackCalled := false
-			onFail := func(_ error) {
-				callbackCalled = true
-			}
-
-			_, _, err := WinCall(tt.isFailure, onFail, tt.r1, 0, tt.callErr)
+			err := CheckWinResult(tt.isFailure, tt.r1, tt.callErr)
+			failed := err != nil
 
 			// 1. Check if we wanted an error at all
-			if (err != nil) != tt.wantErr {
+			if (failed) != tt.wantErr {
 				t.Errorf("WinCall() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			// 2. If it failed, check the callback
-			if tt.wantErr && !callbackCalled {
-				t.Errorf("Expected callback to be called on failure, but it wasn't")
 			}
 
 			// 3. Check for positive matches (errors.Is)
 			if tt.expectIsErr != nil {
+				if !tt.wantErr {
+					t.Errorf("Bad coding: In the tests table, tt.wantErr should be true if tt.expectIsErr is set!")
+				}
 				if !errors.Is(err, tt.expectIsErr) {
 					t.Errorf("Expected error to be %v, but it wasn't", tt.expectIsErr)
 				}
@@ -134,6 +128,9 @@ func TestWinCall(t *testing.T) {
 
 			// 4. Check for negative matches (Ensure we didn't wrap SUCCESS)
 			if tt.expectNoIsErr != nil {
+				if !tt.wantErr {
+					t.Errorf("Bad coding: In the tests table, tt.wantErr should be true if tt.expectNoIsErr is set!")
+				}
 				if errors.Is(err, tt.expectNoIsErr) {
 					t.Errorf("Footgun detected: error is incorrectly 'Is' compatible with %v", tt.expectNoIsErr)
 				}

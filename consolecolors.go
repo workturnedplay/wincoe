@@ -127,10 +127,8 @@ func SetConsoleTextAttribute(h windows.Handle, color uint16) error {
 	// We use CheckBool because the docs say this returns a BOOL.
 	// We pass nil for onFail because we just want to return the error to the caller.
 	// Execute the syscall
-	r1, r2, callErr := procSetConsoleTextAttribute.Call(uintptr(h), uintptr(color))
-
-	// Wrap it up using our utility
-	_, _, err := WinCall(CheckBool, nil, r1, r2, callErr)
+	r1, _, callErr := procSetConsoleTextAttribute.Call(uintptr(h), uintptr(color))
+	err := CheckWinResult(CheckBool, r1, callErr)
 
 	return err
 }

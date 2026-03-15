@@ -51,31 +51,33 @@ var (
 // WinCall processes a Windows API result.
 // It returns nil on success (when isFailure is false).
 // On failure, it returns a wrapped error.
-func WinCall(
+func CheckWinResult(
 	isFailure WinCheckFunc,
-	onFail func(err error),
-	r1, r2 uintptr,
+	//onFail func(err error),
+	r1 uintptr,
 	callErr error,
-) (uintptr, uintptr, error) {
-	if isFailure(r1) {
-		var finalErr error
+) error {
+	if !isFailure(r1) {
+		// Success: return nil so 'if err != nil' behaves normally.
+		return nil
+	}
+	//if isFailure(r1) {
+	var finalErr error
 
-		// If the system says failure but the error code is 0/nil,
-		// we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
-		if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
-			finalErr = fmt.Errorf("system reported failure (ret=%d) but LastError was 0", r1)
-		} else {
-			// We only use %w when there is a REAL error to wrap.
-			finalErr = fmt.Errorf("WinCall failed: %w", callErr)
-		}
-
-		if onFail != nil {
-			onFail(finalErr)
-		}
-
-		return r1, r2, finalErr
+	// If the system says failure but the error code is 0/nil,
+	// we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
+	if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
+		finalErr = fmt.Errorf("system reported failure (ret=%d) but LastError was 0", r1)
+	} else {
+		// We only use %w when there is a REAL error to wrap.
+		finalErr = fmt.Errorf("WinCall failed: %w", callErr)
 	}
 
-	// Success: return nil so 'if err != nil' behaves normally.
-	return r1, r2, nil
+	// if onFail != nil {
+	// 	onFail(finalErr)
+	// }
+
+	return finalErr
+	//}
+	//return nil
 }
