@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestWinCall(t *testing.T) {
+func TestCheckWinResult(t *testing.T) {
 	// Define the cases we want to cover
 	tests := []struct {
 		name          string
@@ -113,7 +113,7 @@ func TestWinCall(t *testing.T) {
 
 			// 1. Check if we wanted an error at all
 			if (failed) != tt.wantErr {
-				t.Errorf("WinCall() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("CheckWinResult() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			// 3. Check for positive matches (errors.Is)

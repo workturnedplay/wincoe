@@ -48,7 +48,7 @@ var (
 	CheckHRESULT WinCheckFunc = func(r1 uintptr) bool { return int32(r1) < 0 }
 )
 
-// WinCall processes a Windows API result.
+// CheckWinResult processes a Windows API result.
 // It returns nil on success (when isFailure is false).
 // On failure, it returns a wrapped error.
 func CheckWinResult(
@@ -61,7 +61,7 @@ func CheckWinResult(
 		// Success: return nil so 'if err != nil' behaves normally.
 		return nil
 	}
-	//if isFailure(r1) {
+
 	var finalErr error
 
 	// If the system says failure but the error code is 0/nil,
@@ -70,14 +70,8 @@ func CheckWinResult(
 		finalErr = fmt.Errorf("system reported failure (ret=%d) but LastError was 0", r1)
 	} else {
 		// We only use %w when there is a REAL error to wrap.
-		finalErr = fmt.Errorf("WinCall failed: %w", callErr)
+		finalErr = fmt.Errorf("CheckWinResult failed: %w", callErr)
 	}
 
-	// if onFail != nil {
-	// 	onFail(finalErr)
-	// }
-
 	return finalErr
-	//}
-	//return nil
 }
