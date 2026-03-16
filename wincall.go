@@ -51,7 +51,10 @@ var (
 // CheckWinResult processes a Windows API result.
 // It returns nil on success (when isFailure is false).
 // On failure, it returns a wrapped error.
+// Use errors.Is whenever you want to check whether an error matches a particular sentinel value, like windows.ERROR_ACCESS_DENIED or windows.ERROR_SUCCESS.
+// This works even if the error was wrapped with %w in fmt.Errorf, which is exactly what this helper does.
 func CheckWinResult(
+	operationNameToIncludeInErrorMessages string,
 	isFailure WinCheckFunc,
 	//onFail func(err error),
 	r1 uintptr,
@@ -67,11 +70,65 @@ func CheckWinResult(
 	// If the system says failure but the error code is 0/nil,
 	// we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
 	if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
-		finalErr = fmt.Errorf("system reported failure (ret=%d) but LastError was 0", r1)
+		finalErr = fmt.Errorf("%q reported failure (ret=%d) but LastError was 0", operationNameToIncludeInErrorMessages, r1)
 	} else {
+		//finalErr = callErr //unwrapped
 		// We only use %w when there is a REAL error to wrap.
-		finalErr = fmt.Errorf("CheckWinResult failed: %w", callErr)
+		finalErr = fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, callErr)
 	}
 
 	return finalErr
+}
+
+// WinCall does r1,r2,err:=proc.Call(args...) and returns them, but err is properly set, so it's not gonna be nil if r1 indicates error!
+//
+// Use errors.Is whenever you want to check whether an error matches a particular sentinel value, like windows.ERROR_ACCESS_DENIED or windows.ERROR_SUCCESS.
+// This works even if the error was wrapped with %w in fmt.Errorf, which is exactly what this helper does.
+//
+// WinCall invokes the Windows procedure and processes the result using the provided
+// failure checker. It returns r1, r2, and an error that is never nil when r1 indicates failure.
+//
+// This version accepts any type that implements LazyProcish, which allows easy mocking in tests.
+func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) (uintptr, uintptr, error) {
+	r1, r2, callErr := proc.Call(args...)
+	err := CheckWinResult(proc.Name(), check, r1, callErr)
+	return r1, r2, err
+}
+
+// LazyProcish is the minimal interface that WinCall needs from a LazyProc-like object.
+//
+// We deliberately avoid the full *windows.LazyProc type to enable mocking.
+type LazyProcish interface {
+	// Name returns the name of the procedure (used in error messages).
+	//Why Name() instead of a field? Because interfaces in Go cannot require fields — only methods
+	Name() string
+
+	// Call invokes the Windows procedure with the given arguments.
+	// Signature must match windows.LazyProc.Call exactly.
+	Call(a ...uintptr) (r1, r2 uintptr, lastErr error)
+}
+
+// realLazyProc wraps *windows.LazyProc to satisfy LazyProcish.
+//
+// Embedding gives us .Call() for free via promotion.
+type realLazyProc struct {
+	*windows.LazyProc
+}
+
+// Name implements LazyProcish.
+//
+// Returns the procedure name for use in error messages.
+func (r *realLazyProc) Name() string {
+	return r.LazyProc.Name
+}
+
+// RealProc wraps a *windows.LazyProc into the testable interface.
+//
+// Use this at all production call sites instead of passing *windows.LazyProc directly.
+//
+// The real production code that previously called WinCall(&proc, ...) now becomes WinCall(&realLazyProc{LazyProc: &proc}, ...) or you use this tiny helper like:
+//
+// r1, r2, err := WinCall(RealProc(proc), CheckBool, uintptr(unsafe.Pointer(&something)), ...)
+func RealProc(p *windows.LazyProc) LazyProcish {
+	return &realLazyProc{LazyProc: p}
 }

@@ -24,13 +24,13 @@ import (
 
 var (
 	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
-	procSetConsoleTextAttribute = kernel32.NewProc("SetConsoleTextAttribute")
+	procSetConsoleTextAttribute = RealProc(kernel32.NewProc("SetConsoleTextAttribute"))
 )
 
 const (
-	// to be used with windows.GetStdHandle(STD_OUTPUT_HANDLE) only!
+	// STD_OUTPUT_HANDLE to be used with windows.GetStdHandle(STD_OUTPUT_HANDLE) only!
 	STD_OUTPUT_HANDLE = uint32(-11 & 0xFFFFFFFF) // cast to uint32
-	// to be used with windows.GetStdHandle(STD_OUTPUT_HANDLE) only!
+	// STD_ERROR_HANDLE to be used with windows.GetStdHandle(STD_OUTPUT_HANDLE) only!
 	STD_ERROR_HANDLE = uint32(-12 & 0xFFFFFFFF)
 
 	FOREGROUND_RED       = 0x0004
@@ -60,15 +60,10 @@ const (
 
 // WithConsoleColor temporarily changes text attribute, runs fn, then restores original
 func WithConsoleColor(outputHandle windows.Handle, color uint16, fn func()) error {
-	//hStdout := windows.Handle(STD_OUTPUT_HANDLE)
-
-	//var csbi windows.ConsoleScreenBufferInfo
 	originalColor, err := GetConsoleScreenBufferAttributes(outputHandle)
-	//if err := windows.GetConsoleScreenBufferInfo(outputHandle, &csbi);
 	if err != nil {
 		return fmt.Errorf("GetConsoleScreenBufferInfo failed: %w", err)
 	}
-	//original := csbi.Attributes
 	defer func() {
 		// Always restore (even on panic inside fn)
 		_ = SetConsoleTextAttribute(outputHandle, originalColor) //nolint:errcheck // because nothing to do with the error.
@@ -86,24 +81,17 @@ func WithConsoleColor(outputHandle windows.Handle, color uint16, fn func()) erro
 // This is the missing piece you mentioned.
 // NOTE: outputHandle must be gotten via windows.GetStdHandle(STD_OUTPUT_HANDLE) or via windows.Stdout or windows.Stderr but NOT directly using STD_OUTPUT_HANDLE
 func GetConsoleScreenBufferAttributes(outputHandle windows.Handle) (uint16, error) {
-	//hStdout := windows.Handle(STD_OUTPUT_HANDLE) //windows.GetStdHandle(STD_OUTPUT_HANDLE)
 	if outputHandle == windows.InvalidHandle {
 		return 0, errors.New("invalid console handle")
 	}
 
 	var csbi windows.ConsoleScreenBufferInfo
-	//XXX: don't use STD_OUTPUT_HANDLE to this call, it won't work!
+	//XXX: don't use STD_OUTPUT_HANDLE for this call, it won't work!
 	if err := windows.GetConsoleScreenBufferInfo(outputHandle, &csbi); err != nil {
 		return 0, fmt.Errorf("GetConsoleScreenBufferInfo failed: %w", err)
 	}
 	return csbi.Attributes, nil
 }
-
-// // RestoreConsoleTextAttribute is just a thin wrapper around your existing Set function.
-// // Call it after every colored line.
-// func RestoreConsoleTextAttribute(h windows.Handle, orig uint16) error {
-// 	return SetConsoleTextAttribute(h, orig)
-// }
 
 // // Quick one-liners for common cases (optional, but cleaner usage)
 // func WithInfoColor(fn func()) error {
@@ -127,8 +115,10 @@ func SetConsoleTextAttribute(h windows.Handle, color uint16) error {
 	// We use CheckBool because the docs say this returns a BOOL.
 	// We pass nil for onFail because we just want to return the error to the caller.
 	// Execute the syscall
-	r1, _, callErr := procSetConsoleTextAttribute.Call(uintptr(h), uintptr(color))
-	err := CheckWinResult(CheckBool, r1, callErr)
+	// r1, _, callErr := procSetConsoleTextAttribute.Call(uintptr(h), uintptr(color))
+	// err := CheckWinResult(CheckBool, r1, callErr)
+
+	_, _, err := WinCall(procSetConsoleTextAttribute, CheckBool, uintptr(h), uintptr(color))
 
 	return err
 }
