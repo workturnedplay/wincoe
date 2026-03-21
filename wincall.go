@@ -20,6 +20,7 @@ package wincoe
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -54,6 +55,7 @@ var (
 // Use errors.Is whenever you want to check whether an error matches a particular sentinel value, like windows.ERROR_ACCESS_DENIED or windows.ERROR_SUCCESS.
 // This works even if the error was wrapped with %w in fmt.Errorf, which is exactly what this helper does.
 func CheckWinResult(
+	//can be empty
 	operationNameToIncludeInErrorMessages string,
 	isFailure WinCheckFunc,
 	//onFail func(err error),
@@ -70,7 +72,7 @@ func CheckWinResult(
 	// If the system says failure but the error code is 0/nil,
 	// we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
 	if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
-		finalErr = fmt.Errorf("%q reported failure (ret=%d) but LastError was 0", operationNameToIncludeInErrorMessages, r1)
+		finalErr = fmt.Errorf("%q windows call reported failure (ret=%d) but LastError(aka callErr) was 0", operationNameToIncludeInErrorMessages, r1)
 	} else {
 		//finalErr = callErr //unwrapped
 		// We only use %w when there is a REAL error to wrap.
@@ -80,7 +82,11 @@ func CheckWinResult(
 	return finalErr
 }
 
-// WinCall does r1,r2,err:=proc.Call(args...) and returns them, but err is properly set, so it's not gonna be nil if r1 indicates error!
+// UnspecifiedWinApi is the string used when empty op name is used
+const UnspecifiedWinApi string = "unspecified_winapi"
+
+// WinCall does r1,r2,err:=proc.Call(args...) and returns them, but
+// err is guaranteed to be non-nil when check(r1) indicates failure.
 //
 // Use errors.Is whenever you want to check whether an error matches a particular sentinel value, like windows.ERROR_ACCESS_DENIED or windows.ERROR_SUCCESS.
 // This works even if the error was wrapped with %w in fmt.Errorf, which is exactly what this helper does.
@@ -90,8 +96,12 @@ func CheckWinResult(
 //
 // This version accepts any type that implements LazyProcish, which allows easy mocking in tests.
 func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) (uintptr, uintptr, error) {
+	op := strings.TrimSpace(proc.Name())
+	if op == "" {
+		op = UnspecifiedWinApi
+	}
 	r1, r2, callErr := proc.Call(args...)
-	err := CheckWinResult(proc.Name(), check, r1, callErr)
+	err := CheckWinResult(op, check, r1, callErr)
 	return r1, r2, err
 }
 

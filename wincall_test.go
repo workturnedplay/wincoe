@@ -18,6 +18,7 @@ package wincoe
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -137,6 +138,19 @@ func TestCheckWinResult(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("Empty operation name keeps it empty", func(t *testing.T) {
+		err := CheckWinResult("", CheckBool, 0, windows.ERROR_ACCESS_DENIED)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		msg := err.Error()
+
+		if !strings.Contains(msg, `""`) {
+			t.Errorf("unexpected non-empty quoted op name in error: %q", msg)
+		}
+	})
 }
 
 func TestWinCall(t *testing.T) {
@@ -181,7 +195,41 @@ func TestWinCall(t *testing.T) {
 				}
 			}
 		})
-	}
+	} // for
+	t.Run("WinCall normalizes empty/whitespace proc names", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			procName string
+		}{
+			{"empty", ""},
+			{"single space", " "},
+			{"multiple spaces", "   "},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				mock := &mockLazyProc{
+					name:    tt.procName,
+					nextR1:  0,
+					nextErr: windows.ERROR_ACCESS_DENIED,
+				}
+
+				_, _, err := WinCall(mock, CheckBool)
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				msg := err.Error()
+
+				// because you're using %q
+				expectedPrefix := `"` + UnspecifiedWinApi + `"`
+
+				if !strings.HasPrefix(msg, expectedPrefix) {
+					t.Errorf("procName=%q: expected prefix %q, got %q", tt.procName, expectedPrefix, msg)
+				}
+			})
+		}
+	})
 }
 
 // mockLazyProc is a controllable fake for LazyProcish.
