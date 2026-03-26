@@ -20,6 +20,7 @@ package wincoe
 import (
 	"github.com/workturnedplay/wincoe/internal/consolecolors"
 	"github.com/workturnedplay/wincoe/internal/waitanykey"
+	"github.com/workturnedplay/wincoe/internal/wincall"
 )
 
 var SetConsoleTextAttribute = consolecolors.SetConsoleTextAttribute
@@ -48,3 +49,9 @@ var ReadKeySequence = waitanykey.ReadKeySequence
 var WaitAnyKeyIfInteractive = waitanykey.WaitAnyKeyIfInteractive
 var WaitAnyKey = waitanykey.WaitAnyKey
 var IsStdinConsoleInteractive = waitanykey.IsStdinConsoleInteractive
+
+var RealProc = wincall.RealProc
+var WinCall = wincall.WinCall
+var RealProc2 = wincall.RealProc2
+var BindFunc = wincall.BindFunc
+var NewBoundProc = wincall.NewBoundProc

@@ -24,8 +24,10 @@ import (
 )
 
 var (
-	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
-	procSetConsoleTextAttribute = wincall.RealProc(kernel32.NewProc("SetConsoleTextAttribute"))
+	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	//procSetConsoleTextAttribute  = wincall.RealProc(kernel32.NewProc("SetConsoleTextAttribute"))
+	//procSetConsoleTextAttribute2 = wincall.BindFunc(wincall.RealProc2(kernel32, "SetConsoleTextAttribute"), wincall.CheckBool)
+	procSetConsoleTextAttribute3 = wincall.NewBoundProc(kernel32, "SetConsoleTextAttribute", wincall.CheckBool)
 )
 
 const (
@@ -118,10 +120,18 @@ func SetConsoleTextAttribute(h windows.Handle, color uint16) error {
 	// We use CheckBool because the docs say this returns a BOOL.
 	// We pass nil for onFail because we just want to return the error to the caller.
 	// Execute the syscall
+	// //works:
 	// r1, _, callErr := procSetConsoleTextAttribute.Call(uintptr(h), uintptr(color))
 	// err := CheckWinResult(CheckBool, r1, callErr)
 
-	_, _, err := wincall.WinCall(procSetConsoleTextAttribute, wincall.CheckBool, uintptr(h), uintptr(color))
+	// //works:
+	// _, _, err := wincall.WinCall(procSetConsoleTextAttribute, wincall.CheckBool, uintptr(h), uintptr(color))
+
+	// //works too:
+	// _, _, err := procSetConsoleTextAttribute2(uintptr(h), uintptr(color))
+
+	//works too:
+	_, _, err := procSetConsoleTextAttribute3(uintptr(h), uintptr(color))
 
 	return err
 }

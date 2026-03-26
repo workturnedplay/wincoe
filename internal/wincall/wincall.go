@@ -50,10 +50,16 @@ var (
 )
 
 // CheckWinResult processes a Windows API result.
+//
 // It returns nil on success (when isFailure is false).
+//
 // On failure, it returns a wrapped error.
-// Use errors.Is whenever you want to check whether an error matches a particular sentinel value, like windows.ERROR_ACCESS_DENIED or windows.ERROR_SUCCESS.
+// /
+// Use errors.Is whenever you want to check whether an error matches a particular sentinel value, like windows.ERROR_ACCESS_DENIED
+//
 // This works even if the error was wrapped with %w in fmt.Errorf, which is exactly what this helper does.
+//
+// callErr will never be windows.ERROR_SUCCESS but instead it would be nil or an error if r1 indicates an error but callErr didn't.
 func CheckWinResult(
 	//can be empty
 	operationNameToIncludeInErrorMessages string,
@@ -141,4 +147,125 @@ func (r *realLazyProc) Name() string {
 // r1, r2, err := WinCall(RealProc(proc), CheckBool, uintptr(unsafe.Pointer(&something)), ...)
 func RealProc(p *windows.LazyProc) LazyProcish {
 	return &realLazyProc{LazyProc: p}
+}
+
+// RealProc2 resolves a procedure from the given DLL and wraps it into a LazyProcish.
+//
+// It is a thin, validated convenience over dll.NewProc(name) + RealProc(...).
+// This function enforces basic invariants early:
+//   - dll must be non-nil
+//   - name must be non-empty (after trimming whitespace)
+//
+// The returned LazyProcish is suitable for use with WinCall or higher-level
+// binding helpers such as BindFunc.
+//
+// RealProc2 does NOT attach any failure semantics (WinCheckFunc). Callers must
+// explicitly provide the appropriate check strategy (e.g. CheckBool, CheckHandle)
+// when invoking the procedure via WinCall or when binding it.
+//
+// Panics:
+//   - if dll is nil
+//   - if name is empty or whitespace-only
+func RealProc2(dll *windows.LazyDLL, name string) LazyProcish {
+	if dll == nil {
+		panic("RealProc2: nil dll")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		panic("RealProc2: empty proc name")
+	}
+	return RealProc(dll.NewProc(name))
+}
+
+// WinCall will handle the error type properly, wrap it nicely so if err != nil you can then always do errors.Is on it!
+// BoundFunc represents a bound Windows procedure call with fixed failure semantics.
+//
+// It behaves like a preconfigured syscall wrapper:
+//   - accepts raw uintptr arguments
+//   - returns (r1, r2, error) consistent with WinCall
+//
+// A BoundFunc is typically created via BindFunc and should be treated as a
+// low-level primitive. Higher-level, type-safe wrappers are recommended for
+// production use to avoid repetitive uintptr conversions and to enforce argument
+// correctness.
+//
+// BoundFunc makes no guarantees about argument arity or type safety beyond what
+// the underlying Windows API expects.
+type BoundFunc func(args ...uintptr) (uintptr, uintptr, error)
+
+// BindFunc binds a LazyProcish together with a WinCheckFunc into a callable function.
+//
+// The returned BoundFunc encapsulates:
+//   - the procedure to call
+//   - the failure detection strategy (check)
+//
+// When invoked, the BoundFunc delegates to WinCall, ensuring that:
+//   - r1, r2 are returned unchanged
+//   - the error is non-nil whenever check(r1) indicates failure
+//   - Windows errors are wrapped consistently (see CheckWinResult)
+//
+// This removes the need to repeatedly pass the same WinCheckFunc at each call site.
+//
+// BindFunc does NOT perform any argument validation; callers are responsible for
+// providing the correct number and type (uintptr-convertible) arguments.
+//
+// Panics:
+//   - if proc is nil
+//   - if check is nil
+func BindFunc(proc LazyProcish, check WinCheckFunc) BoundFunc {
+	if proc == nil {
+		panic("BindFunc: nil proc")
+	}
+	if check == nil {
+		panic("BindFunc: nil check")
+	}
+
+	return func(args ...uintptr) (uintptr, uintptr, error) {
+		return WinCall(proc, check, args...)
+	}
+}
+
+// NewBoundProc resolves a procedure from the given DLL and binds it with a
+// WinCheckFunc into a ready-to-call BoundFunc.
+//
+// It is a convenience helper that composes RealProc2 and BindFunc into a single
+// step, producing a callable that:
+//   - invokes the resolved Windows procedure
+//   - applies the provided failure detection strategy (check)
+//   - returns (r1, r2, error) with WinCall semantics
+//
+// This eliminates the need to separately call RealProc2 and BindFunc at the
+// declaration site, while still preserving their behavior.
+//
+// The returned BoundFunc is a low-level wrapper accepting raw uintptr arguments.
+// Callers are responsible for passing the correct number and types of arguments.
+// For safer and more ergonomic usage, prefer building typed wrappers on top.
+//
+// Panics:
+//   - if dll is nil
+//   - if name is empty or whitespace-only
+//   - if check is nil
+func NewBoundProc(
+	dll *windows.LazyDLL,
+	name string,
+	check WinCheckFunc,
+) BoundFunc {
+	if dll == nil {
+		panic("NewBoundProc: nil dll")
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		panic("NewBoundProc: empty proc name")
+	}
+
+	if check == nil {
+		panic("NewBoundProc: nil check")
+	}
+
+	proc := RealProc(dll.NewProc(name))
+
+	return func(args ...uintptr) (uintptr, uintptr, error) {
+		return WinCall(proc, check, args...)
+	}
 }
