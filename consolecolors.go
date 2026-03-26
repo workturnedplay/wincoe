@@ -59,18 +59,20 @@ const (
 )
 
 // WithConsoleColor temporarily changes text attribute, runs fn, then restores original
-func WithConsoleColor(outputHandle windows.Handle, color uint16, fn func()) error {
+func WithConsoleColor(outputHandle windows.Handle, color uint16, fn func()) (errRet error) {
 	originalColor, err := GetConsoleScreenBufferAttributes(outputHandle)
 	if err != nil {
 		return fmt.Errorf("GetConsoleScreenBufferInfo failed: %w", err)
 	}
 	defer func() {
 		// Always restore (even on panic inside fn)
-		_ = SetConsoleTextAttribute(outputHandle, originalColor) //nolint:errcheck // because nothing to do with the error.
+		if resetErr := SetConsoleTextAttribute(outputHandle, originalColor); resetErr != nil { //NVM nolint:errcheck // because nothing to do with the error.
+			errRet = fmt.Errorf("SetConsoleTextAttribute failed to reset back to original color %d, err: %w", originalColor, resetErr) // Only overwrite if the main logic succeeded
+		}
 	}()
 	// Set new color
 	if err := SetConsoleTextAttribute(outputHandle, color); err != nil {
-		return fmt.Errorf("SetConsoleTextAttribute failed: %w", err)
+		return fmt.Errorf("SetConsoleTextAttribute failed to set new color %d, err: %w", color, err)
 	}
 
 	fn()
