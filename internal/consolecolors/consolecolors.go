@@ -14,17 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package wincoe
+package consolecolors
 
 import (
 	"errors"
 	"fmt"
+	"github.com/workturnedplay/wincoe/internal/wincall"
 	"golang.org/x/sys/windows"
 )
 
 var (
 	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
-	procSetConsoleTextAttribute = RealProc(kernel32.NewProc("SetConsoleTextAttribute"))
+	procSetConsoleTextAttribute = wincall.RealProc(kernel32.NewProc("SetConsoleTextAttribute"))
 )
 
 const (
@@ -33,29 +34,29 @@ const (
 	// STD_ERROR_HANDLE to be used with windows.GetStdHandle(STD_OUTPUT_HANDLE) only!
 	STD_ERROR_HANDLE = uint32(-12 & 0xFFFFFFFF)
 
-	FOREGROUND_RED       = 0x0004
-	FOREGROUND_GREEN     = 0x0002
-	FOREGROUND_BLUE      = 0x0001
-	FOREGROUND_NORMAL    = 0x0007
-	FOREGROUND_INTENSITY = 0x0008
-	FOREGROUND_GRAY      = FOREGROUND_INTENSITY // dark gray / bright black
+	FOREGROUND_RED       uint16 = 0x0004
+	FOREGROUND_GREEN     uint16 = 0x0002
+	FOREGROUND_BLUE      uint16 = 0x0001
+	FOREGROUND_NORMAL    uint16 = 0x0007
+	FOREGROUND_INTENSITY uint16 = 0x0008
+	FOREGROUND_GRAY      uint16 = FOREGROUND_INTENSITY // dark gray / bright black
 
 	// derived colors
-	FOREGROUND_YELLOW        = FOREGROUND_RED | FOREGROUND_GREEN
-	FOREGROUND_BRIGHT_YELLOW = FOREGROUND_YELLOW | FOREGROUND_INTENSITY
+	FOREGROUND_YELLOW        uint16 = FOREGROUND_RED | FOREGROUND_GREEN
+	FOREGROUND_BRIGHT_YELLOW uint16 = FOREGROUND_YELLOW | FOREGROUND_INTENSITY
 
-	FOREGROUND_MAGENTA        = FOREGROUND_RED | FOREGROUND_BLUE
-	FOREGROUND_BRIGHT_MAGENTA = FOREGROUND_MAGENTA | FOREGROUND_INTENSITY
+	FOREGROUND_MAGENTA        uint16 = FOREGROUND_RED | FOREGROUND_BLUE
+	FOREGROUND_BRIGHT_MAGENTA uint16 = FOREGROUND_MAGENTA | FOREGROUND_INTENSITY
 
-	FOREGROUND_CYAN        = FOREGROUND_GREEN | FOREGROUND_BLUE
-	FOREGROUND_BRIGHT_CYAN = FOREGROUND_CYAN | FOREGROUND_INTENSITY
+	FOREGROUND_CYAN        uint16 = FOREGROUND_GREEN | FOREGROUND_BLUE
+	FOREGROUND_BRIGHT_CYAN uint16 = FOREGROUND_CYAN | FOREGROUND_INTENSITY
 
-	FOREGROUND_WHITE        = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE
-	FOREGROUND_BRIGHT_WHITE = FOREGROUND_WHITE | FOREGROUND_INTENSITY
+	FOREGROUND_WHITE        uint16 = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE
+	FOREGROUND_BRIGHT_WHITE uint16 = FOREGROUND_WHITE | FOREGROUND_INTENSITY
 
-	FOREGROUND_BRIGHT_RED = FOREGROUND_RED | FOREGROUND_INTENSITY
+	FOREGROUND_BRIGHT_RED uint16 = FOREGROUND_RED | FOREGROUND_INTENSITY
 
-	FOREGROUND_BRIGHT_GREEN = FOREGROUND_GREEN | FOREGROUND_INTENSITY
+	FOREGROUND_BRIGHT_GREEN uint16 = FOREGROUND_GREEN | FOREGROUND_INTENSITY
 )
 
 // WithConsoleColor temporarily changes text attribute, runs fn, then restores original
@@ -120,7 +121,7 @@ func SetConsoleTextAttribute(h windows.Handle, color uint16) error {
 	// r1, _, callErr := procSetConsoleTextAttribute.Call(uintptr(h), uintptr(color))
 	// err := CheckWinResult(CheckBool, r1, callErr)
 
-	_, _, err := WinCall(procSetConsoleTextAttribute, CheckBool, uintptr(h), uintptr(color))
+	_, _, err := wincall.WinCall(procSetConsoleTextAttribute, wincall.CheckBool, uintptr(h), uintptr(color))
 
 	return err
 }

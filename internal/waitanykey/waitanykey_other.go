@@ -15,7 +15,7 @@
 // limitations under the License.
 
 // TODO: untested, as this whole lib is meant for Windows only.
-package wincoe
+package waitanykey
 
 import (
 	"os"
