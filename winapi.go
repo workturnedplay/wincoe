@@ -192,7 +192,7 @@ func QueryFullProcessName(pid uint32) (string, error) {
 
 		// Check if the error is specifically "Buffer too small"
 		// syscall.ERROR_INSUFFICIENT_BUFFER = 0x7A
-		if errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
 			return "", fmt.Errorf("QueryFullProcessNameW failed: %w", err)
 		}
 
