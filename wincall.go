@@ -15,7 +15,7 @@
 // limitations under the License.
 
 // Package wincoe aka winco(r)e, are common functions I use across my projects do keep things DRY.
-package wincall
+package wincoe
 
 import (
 	"errors"
