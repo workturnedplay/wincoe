@@ -65,11 +65,12 @@ var UDP_TABLE_OWNER_PID = winapi.UDP_TABLE_OWNER_PID
 
 // GlobalAPI combines all sub-modules, necessary to inherit the top-level documentation of each function(well, method), keeping it DRY.
 // Methods are the only thing in Go that can be "promoted" through embedding while keeping their documentation linked to the original source.
-type GlobalAPI struct {
-	winapi.WinAPI // Pulls in GetExtendedUdpTable, etc.
+type globalAPI struct {
+	winapi.Exported // Pulls in GetExtendedUdpTable, etc.
 }
 
-var API = GlobalAPI{
-	winapi.WinAPI{},
+// A is a way to access the public API thru such that the submodules within DRY their top-level docs as they would if A weren't the middle-man.
+var A = globalAPI{
+	winapi.Exported{},
 	// ...
 }
