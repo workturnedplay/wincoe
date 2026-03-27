@@ -84,8 +84,20 @@ const (
 
 const (
 	AF_INET             = 2
+	AF_INET6            = 23
 	UDP_TABLE_OWNER_PID = 1 // MIB_UDPTABLE_OWNER_PID
 )
 
 //MaxExtendedPath is the maximum character count supported by the Unicode (W) versions of Windows API functions when using the \\?\ prefix, and it's the limit for QueryFullProcessNameW.
+// don't set a type so it can be compared with other types without error-ing about mismatched types!
 const MaxExtendedPath = 32767
+
+// Static assertions to ensure constants are "stern" enough.
+// This block will fail to compile if the conditions are not met.
+const (
+	// Ensure MaxExtendedPath isn't accidentally set higher than what a uint32 can hold.
+	_ = uint32(MaxExtendedPath)
+)
+
+// Ensure MaxExtendedPath is at least as large as the legacy MAX_PATH (260).
+var _ = [MaxExtendedPath - 260]byte{}
