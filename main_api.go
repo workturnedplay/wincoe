@@ -20,6 +20,7 @@ package wincoe
 import (
 	"github.com/workturnedplay/wincoe/internal/consolecolors"
 	"github.com/workturnedplay/wincoe/internal/waitanykey"
+	"github.com/workturnedplay/wincoe/internal/winapi"
 	"github.com/workturnedplay/wincoe/internal/wincall"
 )
 
@@ -55,3 +56,7 @@ var WinCall = wincall.WinCall
 var RealProc2 = wincall.RealProc2
 var BindFunc = wincall.BindFunc
 var NewBoundProc = wincall.NewBoundProc
+
+var GetExtendedUdpTable = winapi.GetExtendedUDPTable
+var AF_INET = winapi.AF_INET
+var UDP_TABLE_OWNER_PID = winapi.UDP_TABLE_OWNER_PID
