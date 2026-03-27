@@ -30,23 +30,27 @@ import (
 type WinCheckFunc func(r1 uintptr) bool
 
 var (
-	// CheckBool identifies a failure for functions returning a Windows BOOL.
+	// CheckBool identifies a failure for functions returning a Windows BOOL in r1.
 	// In the Windows API, a 0 (FALSE) indicates that the function failed.
 	CheckBool WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
 
-	// CheckHandle identifies a failure for functions returning a HANDLE.
+	// CheckHandle identifies a failure for functions returning a HANDLE in r1.
 	// Many Windows APIs return INVALID_HANDLE_VALUE (all bits set to 1) on failure.
 	// ^uintptr(0) is the Go-idiomatic way to represent -1 as an unsigned pointer.
 	CheckHandle WinCheckFunc = func(r1 uintptr) bool { return r1 == ^uintptr(0) }
 
-	// CheckNull identifies a failure for functions returning a pointer or a handle
+	// CheckNull identifies a failure for functions returning a pointer or a handle in r1
 	// where a NULL value (0) indicates the operation could not be completed.
 	CheckNull WinCheckFunc = func(r1 uintptr) bool { return r1 == 0 }
 
-	// CheckHRESULT identifies a failure for functions that return an HRESULT.
+	// CheckHRESULT identifies a failure for functions that return an HRESULT in r1.
 	// An HRESULT is a 32-bit value where a negative number (high bit set)
 	// indicates an error, while 0 or positive values indicate success.
 	CheckHRESULT WinCheckFunc = func(r1 uintptr) bool { return int32(r1) < 0 }
+
+	// CheckErrno identifies a failure for Win32 APIs that return a DWORD error code in r1.
+	// In this convention, 0 (ERROR_SUCCESS) means success, any non-zero value is a failure.
+	CheckErrno WinCheckFunc = func(r1 uintptr) bool { return r1 != 0 }
 )
 
 // CheckWinResult processes a Windows API result.
@@ -60,6 +64,8 @@ var (
 // This works even if the error was wrapped with %w in fmt.Errorf, which is exactly what this helper does.
 //
 // callErr will never be windows.ERROR_SUCCESS but instead it would be nil or an error if r1 indicates an error but callErr didn't.
+//
+// operationNameToIncludeInErrorMessages can be empty, unlike for WinCall, it's not converted into a predefined string.
 func CheckWinResult(
 	//can be empty
 	operationNameToIncludeInErrorMessages string,
@@ -73,19 +79,47 @@ func CheckWinResult(
 		return nil
 	}
 
-	var finalErr error
-
-	// If the system says failure but the error code is 0/nil,
-	// we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
-	if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
-		finalErr = fmt.Errorf("%q windows call reported failure (ret=%d) but LastError(aka callErr) was 0", operationNameToIncludeInErrorMessages, r1)
-	} else {
-		//finalErr = callErr //unwrapped
-		// We only use %w when there is a REAL error to wrap.
-		finalErr = fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, callErr)
+	// Normalize callErr: treat ERROR_SUCCESS as nil
+	if callErr != nil && errors.Is(callErr, windows.ERROR_SUCCESS) {
+		callErr = nil
 	}
 
-	return finalErr
+	// If callErr is missing/useless, try to recover from r1
+	if callErr == nil {
+		// Many Win32 APIs (e.g. GetExtendedUdpTable) return the error in r1.
+		// Only treat r1 as an errno if it's non-zero.
+		if r1 != 0 {
+			errno := windows.Errno(r1)
+
+			// Defensive: avoid ever wrapping ERROR_SUCCESS
+			if !errors.Is(errno, windows.ERROR_SUCCESS) {
+				// since r1 != 0 already, this is bound to never be ERROR_SUCCESS here, unless r1 != 0 can ever be ERROR_SUCCESS, unsure.
+				return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, errno)
+			}
+		}
+
+		// Fallback: truly unknown failure
+		return fmt.Errorf(
+			"%q windows call reported failure (ret=%d) but no usable error was provided",
+			operationNameToIncludeInErrorMessages,
+			r1,
+		)
+	}
+
+	// Normal path: we have a meaningful callErr
+	return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, callErr)
+
+	// // If the system says failure but the error code is 0/nil,
+	// // we return a concrete error message WITHOUT wrapping ERROR_SUCCESS.
+	// if callErr == nil || errors.Is(callErr, windows.ERROR_SUCCESS) {
+	// 	finalErr = fmt.Errorf("%q windows call reported failure (ret=%d) but LastError(aka callErr) was 0", operationNameToIncludeInErrorMessages, r1)
+	// } else {
+	// 	//finalErr = callErr //unwrapped
+	// 	// We only use %w when there is a REAL error to wrap.
+	// 	finalErr = fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, callErr)
+	// }
+
+	// return finalErr
 }
 
 // UnspecifiedWinApi is the string used when empty op name is used

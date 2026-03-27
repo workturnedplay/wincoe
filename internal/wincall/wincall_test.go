@@ -104,6 +104,45 @@ var tests = []struct {
 		callErr:   nil,
 		wantErr:   false,
 	},
+	{
+		name:      "Errno Success (r1=0)",
+		isFailure: CheckErrno,
+		r1:        0,
+		callErr:   nil,
+		wantErr:   false,
+	},
+	{
+		name:        "Errno Failure (r1=ERROR_ACCESS_DENIED, callErr=nil)",
+		isFailure:   CheckErrno,
+		r1:          uintptr(windows.ERROR_ACCESS_DENIED),
+		callErr:     nil,
+		wantErr:     true,
+		expectIsErr: windows.ERROR_ACCESS_DENIED,
+	},
+	{
+		name:        "Errno Failure prefers callErr over r1",
+		isFailure:   CheckErrno,
+		r1:          uintptr(windows.ERROR_ACCESS_DENIED),
+		callErr:     windows.ERROR_INVALID_HANDLE,
+		wantErr:     true,
+		expectIsErr: windows.ERROR_INVALID_HANDLE,
+	},
+	{
+		name:        "Errno Failure with SUCCESS in callErr falls back to r1",
+		isFailure:   CheckErrno,
+		r1:          uintptr(windows.ERROR_ACCESS_DENIED),
+		callErr:     windows.ERROR_SUCCESS,
+		wantErr:     true,
+		expectIsErr: windows.ERROR_ACCESS_DENIED,
+	},
+	{
+		name:          "Errno Failure (r1=non-zero but unmapped errno)",
+		isFailure:     CheckErrno,
+		r1:            123456, // arbitrary unknown code
+		callErr:       nil,
+		wantErr:       true,
+		expectNoIsErr: windows.ERROR_SUCCESS,
+	},
 }
 
 func TestCheckWinResult(t *testing.T) {
