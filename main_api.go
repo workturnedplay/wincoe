@@ -57,6 +57,19 @@ var RealProc2 = wincall.RealProc2
 var BindFunc = wincall.BindFunc
 var NewBoundProc = wincall.NewBoundProc
 
-var GetExtendedUdpTable = winapi.GetExtendedUDPTable
+// var GetExtendedUdpTable = winapi.GetExtendedUDPTable
+
+// FIXME: their top-level doc is lost this way!
 var AF_INET = winapi.AF_INET
 var UDP_TABLE_OWNER_PID = winapi.UDP_TABLE_OWNER_PID
+
+// GlobalAPI combines all sub-modules, necessary to inherit the top-level documentation of each function(well, method), keeping it DRY.
+// Methods are the only thing in Go that can be "promoted" through embedding while keeping their documentation linked to the original source.
+type GlobalAPI struct {
+	winapi.WinAPI // Pulls in GetExtendedUdpTable, etc.
+}
+
+var API = GlobalAPI{
+	winapi.WinAPI{},
+	// ...
+}

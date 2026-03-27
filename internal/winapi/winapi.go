@@ -25,6 +25,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type WinAPI struct{}
+
 var (
 	Iphlpapi = windows.NewLazySystemDLL("iphlpapi.dll")
 	//procGetExtendedUdpTable = Iphlpapi.NewProc("GetExtendedUdpTable")
@@ -82,9 +84,10 @@ func loadDll(dll *windows.LazyDLL) {
 // Note:
 //   - this function intentionally operates on raw bytes to avoid committing
 //     to a specific struct layout; build a typed parser on top if needed.
-func GetExtendedUDPTable() ([]byte, error) {
+func (l *WinAPI) GetExtendedUDPTable() ([]byte, error) {
 	var bufSize uint32
 
+	// First call to GetExtendedUdpTable to get required buffer size.
 	_, _, err := callGetExtendedUdpTable(
 		0,
 		uintptr(unsafe.Pointer(&bufSize)),
