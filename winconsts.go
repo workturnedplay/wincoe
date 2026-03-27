@@ -23,6 +23,8 @@ package wincoe
 // 	WinConsts_Is_Now_USED = 0 // so compiler doesn't complain about not being used! Don't actually use this anywhere! Unfortunately I've to export it which means it's also wincoe exported!
 // )
 
+const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
 const (
 	// TH32CS_SNAPHEAPLIST includes all heap lists of the process in the snapshot.
 	TH32CS_SNAPHEAPLIST = 0x00000001
@@ -79,3 +81,11 @@ const (
 
 	FOREGROUND_BRIGHT_GREEN uint16 = FOREGROUND_GREEN | FOREGROUND_INTENSITY
 )
+
+const (
+	AF_INET             = 2
+	UDP_TABLE_OWNER_PID = 1 // MIB_UDPTABLE_OWNER_PID
+)
+
+//MaxExtendedPath is the maximum character count supported by the Unicode (W) versions of Windows API functions when using the \\?\ prefix, and it's the limit for QueryFullProcessNameW.
+const MaxExtendedPath = 32767

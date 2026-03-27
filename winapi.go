@@ -20,7 +20,7 @@ package wincoe
 import (
 	"errors"
 	"fmt"
-	"strings"
+	//"strings"
 	"unsafe"
 
 	//"github.com/workturnedplay/wincoe/internal/wincall"
@@ -39,18 +39,16 @@ var (
 	Kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
 	//procQueryFullProcessName = Kernel32.NewProc("QueryFullProcessImageNameW")
-	callQueryFullProcessName = NewBoundProc(Kernel32, "GetExtendedUdpTable", CheckBool)
+	//
+	// Note: QueryFullProcessNameW expects 'size' to include the null terminator
+	// on input, and returns the length WITHOUT the null terminator on success.
+	callQueryFullProcessName = NewBoundProc(Kernel32, "QueryFullProcessImageNameW", CheckBool)
 	// procCreateToolhelp32Snapshot = Kernel32.NewProc("CreateToolhelp32Snapshot")
 	callCreateToolhelp32Snapshot = NewBoundProc(Kernel32, "CreateToolhelp32Snapshot", CheckHandle)
 	// procProcess32First           = Kernel32.NewProc("Process32FirstW")
 	callProcess32First = NewBoundProc(Kernel32, "Process32FirstW", CheckBool)
 	// procProcess32Next            = Kernel32.NewProc("Process32NextW")
 	callProcess32Next = NewBoundProc(Kernel32, "Process32NextW", CheckBool)
-)
-
-const (
-	AF_INET             = 2
-	UDP_TABLE_OWNER_PID = 1 // MIB_UDPTABLE_OWNER_PID
 )
 
 // auto runs before main(), loads the DLLs non-lazily.
@@ -139,33 +137,92 @@ func GetExtendedUDPTable() ([]byte, error) {
 //   - opening the process handle with PROCESS_QUERY_LIMITED_INFORMATION
 //   - preparing a buffer for the UTF16 path
 //   - calling the Windows API
-//   - converting UTF16 to Go string and trimming whitespace
+//   - converting UTF16 to Go string
 //
 // Returns a non-empty string and nil error on success, or an empty string with error on failure.
+// func QueryFullProcessName(pid uint32) (string, error) {
+// 	h, err := windows.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+// 	if err != nil {
+// 		return "", fmt.Errorf("OpenProcess failed for PID %d: %w", pid, err)
+// 	}
+// 	defer windows.CloseHandle(h)
+
+// 	const bufChars = 260
+// 	buf := make([]uint16, bufChars)
+// 	size := uint32(bufChars)
+
+// 	_, _, err = callQueryFullProcessName(
+// 		uintptr(h),
+// 		0,
+// 		uintptr(unsafe.Pointer(&buf[0])),
+// 		uintptr(unsafe.Pointer(&size)),
+// 	)
+// 	if err != nil {
+// 		return "", fmt.Errorf("QueryFullProcessNameW failed for PID %d: %w", pid, err)
+// 	}
+
+//		path := windows.UTF16ToString(buf[:size])
+//		return strings.TrimSpace(path), nil
+//	}
 func QueryFullProcessName(pid uint32) (string, error) {
-	const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-	h, err := windows.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
-		return "", fmt.Errorf("OpenProcess failed for PID %d: %w", pid, err)
+		return "", fmt.Errorf("OpenProcess failedfor PID %d: %w", pid, err)
 	}
 	defer windows.CloseHandle(h)
 
-	const bufChars = 260
-	buf := make([]uint16, bufChars)
-	size := uint32(bufChars)
+	// Start with MAX_PATH (260)
+	size := uint32(windows.MAX_PATH)
+	for {
+		buf := make([]uint16, size)
 
-	_, _, err = callQueryFullProcessName(
-		uintptr(h),
-		0,
-		uintptr(unsafe.Pointer(&buf[0])),
-		uintptr(unsafe.Pointer(&size)),
-	)
-	if err != nil {
-		return "", fmt.Errorf("QueryFullProcessNameW failed for PID %d: %w", pid, err)
+		// Note: QueryFullProcessNameW expects 'size' to include the null terminator
+		// on input, and returns the length WITHOUT the null terminator on success.
+		_, _, err = callQueryFullProcessName(
+			uintptr(h),
+			0,
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(unsafe.Pointer(&size)),
+		)
+
+		if err == nil {
+			// Success! Convert the returned size to string
+			return windows.UTF16ToString(buf[:size]), nil
+		}
+
+		// Check if the error is specifically "Buffer too small"
+		// syscall.ERROR_INSUFFICIENT_BUFFER = 0x7A
+		if errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+			return "", fmt.Errorf("QueryFullProcessNameW failed: %w", err)
+		}
+
+		// If size wasn't updated by the API, manually bump it.
+		// Usually, the API updates 'size' with the required capacity.
+		// if size <= uint32(len(buf)) {
+		// 	size *= 2
+		// }
+		// G115 Fix: Ensure we don't overflow uint32 when checking len(buf)
+		// and check against our safety cap.
+		currentLen := uint64(len(buf))
+		if uint64(size) <= currentLen {
+			// If the API didn't give us a new size, double it
+			newSize := currentLen * 2
+			// Safety cap to prevent infinite loops/OOM
+			if newSize > MaxExtendedPath {
+				return "", fmt.Errorf("path exceeds MaxExtendedPath (%d)", MaxExtendedPath)
+			}
+			size = uint32(newSize)
+		} else if size > MaxExtendedPath {
+			// Safety cap to prevent infinite loops/OOM
+
+			// If the API requested a size larger than the NT limit
+			return "", fmt.Errorf("requested buffer size %d exceeds limit", size)
+		}
+
+		// if size > 32767 {
+		// 	return "", fmt.Errorf("path exceeds maximum supported length")
+		// }
 	}
-
-	path := windows.UTF16ToString(buf[:size])
-	return strings.TrimSpace(path), nil
 }
 
 // exePathFromPID returns process image path for pid or an error.
@@ -205,18 +262,6 @@ func GetProcessName(pid uint32) (string, error) {
 	}
 	return "", fmt.Errorf("not found, err: %w", err)
 }
-
-// // CreateProcessSnapshot wraps callCreateToolhelp32Snapshot.
-// func (l *Exported) CreateProcessSnapshot() (windows.Handle, error) {
-// 	const TH32CS_SNAPPROCESS = 0x00000002
-// 	r1, _, err := callCreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	return windows.Handle(r1), nil
-// }
-
-// const TH32CS_SNAPPROCESS = 0x00000002
 
 // CreateToolhelp32Snapshot creates a snapshot of the specified processes, threads,
 // modules, or heaps in the system. The snapshot can then be used with functions
