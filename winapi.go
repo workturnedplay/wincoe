@@ -21,7 +21,9 @@ import (
 	"errors"
 	"fmt"
 	//"strings"
+	"encoding/binary"
 	"math"
+	"net"
 	"unsafe"
 
 	//"github.com/workturnedplay/wincoe/internal/wincall"
@@ -508,4 +510,165 @@ func GetServiceNamesFromPID(targetPID uint32) ([]string, error) {
 	}
 
 	return serviceNames, nil
+}
+
+// pidAndExeForUDP returns (pid, exePath_or_exeName, error).
+// clientAddr should be the remote UDP address observed on the server side (e.g., 127.0.0.1:49936).
+func PidAndExeForUDP(clientAddr *net.UDPAddr) (uint32, string, error) {
+	//capital P in PidAndExeForUDP means exported, apparently!
+	if clientAddr == nil {
+		return 0, "", errors.New("nil clientAddr")
+	}
+	ip4 := clientAddr.IP.To4()
+	if ip4 == nil {
+		return 0, "", errors.New("only IPv4 supported")
+	}
+	port := uint16(clientAddr.Port)
+
+	buf, err := GetExtendedUDPTable(false, AF_INET)
+	if err != nil {
+		return 0, "", err
+	}
+
+	if buf == nil {
+		return 0, "", errors.New("GetExtendedUdpTable returned empty buffer which means there were no UDP entries in the table")
+	}
+
+	// Buffer layout: DWORD dwNumEntries; then array of MIB_UDPROW_OWNER_PID entries.
+	if len(buf) < 4 {
+		return 0, "", errors.New("GetExtendedUdpTable returned too small buffer")
+	}
+	num := binary.LittleEndian.Uint32(buf[:4])
+	const rowSize = 12 // MIB_UDPROW_OWNER_PID has 3 DWORDs = 12 bytes
+	offset := 4
+	for i := uint32(0); i < num; i++ {
+		if offset+rowSize > len(buf) {
+			break
+		}
+		localAddr := binary.LittleEndian.Uint32(buf[offset : offset+4])
+		localPortRaw := binary.LittleEndian.Uint32(buf[offset+4 : offset+8])
+		owningPid := binary.LittleEndian.Uint32(buf[offset+8 : offset+12])
+		offset += rowSize
+
+		// localPortRaw stores port in network byte order in low 16 bits.
+		localPort := uint16(localPortRaw & 0xFFFF)
+		localPort = (localPort>>8)&0xFF | (localPort&0xFF)<<8 // convert to host order
+
+		// convert DWORD IP (little-endian) to net.IP
+		ipb := []byte{
+			byte(localAddr & 0xFF),
+			byte((localAddr >> 8) & 0xFF),
+			byte((localAddr >> 16) & 0xFF),
+			byte((localAddr >> 24) & 0xFF),
+		}
+		entryIP := net.IPv4(ipb[0], ipb[1], ipb[2], ipb[3])
+
+		//fmt.Println("Checking:",entryIP,ip4, localPort, port)
+
+		if localPort == port {
+			// treat 0.0.0.0 as wildcard match
+			if entryIP.Equal(net.IPv4zero) || entryIP.Equal(ip4) {
+				// found PID
+				exe, err := ExePathFromPID(owningPid)
+				if err != nil {
+					//fmt.Println(err)
+					// got error due to permissions needed for abs. path? this will work but it's just the .exe:
+					//exe, err2 := wincoe.GetProcessName(owningPid) // shadowing is only a warning here, major footgun otherwise.
+
+					var err2 error // Declare err2 so we don't have to use :=
+					exe, err2 = GetProcessName(owningPid)
+
+					if err2 != nil {
+						return 0, "", fmt.Errorf("pid %d not found for %s, errTransient:'%v', err:'%w'", num, clientAddr.String(), err, err2)
+					}
+
+					//_ = exe // enable when trying for shadowing
+				}
+				return owningPid, exe, nil
+			}
+		}
+	}
+
+	return 0, "", fmt.Errorf("pid %d not found for %s", num, clientAddr.String())
+}
+
+// clientAddr should be the remote TCP address observed on the server side (e.g., 127.0.0.1:49936).
+func PidAndExeForTCP(clientAddr *net.TCPAddr) (uint32, string, error) {
+	if clientAddr == nil {
+		return 0, "", errors.New("nil clientAddr")
+	}
+	ip4 := clientAddr.IP.To4()
+	if ip4 == nil {
+		return 0, "", errors.New("only IPv4 supported")
+	}
+	port := uint16(clientAddr.Port)
+
+	// Fetch the table
+	buf, err := GetExtendedTCPTable(false, AF_INET) //FIXME: do I need here to include the AF_INET6 ?! probably, and for UDP func too!
+	if err != nil {
+		return 0, "", err
+	}
+	if buf == nil {
+		return 0, "", errors.New("GetExtendedTcpTable returned empty buffer")
+	}
+
+	if len(buf) < 4 {
+		return 0, "", errors.New("GetExtendedTcpTable buffer too small for header")
+	}
+
+	num := binary.LittleEndian.Uint32(buf[:4])
+
+	// MIB_TCPROW_OWNER_PID structure:
+	// 0: dwState (4 bytes)
+	// 4: dwLocalAddr (4 bytes)
+	// 8: dwLocalPort (4 bytes)
+	// 12: dwRemoteAddr (4 bytes)
+	// 16: dwRemotePort (4 bytes)
+	// 20: dwOwningPid (4 bytes)
+	const rowSize = 24
+	offset := 4
+
+	for i := uint32(0); i < num; i++ {
+		if offset+rowSize > len(buf) {
+			break
+		}
+
+		// Extract fields based on the 24-byte MIB_TCPROW_OWNER_PID layout
+		localAddrRaw := binary.LittleEndian.Uint32(buf[offset+4 : offset+8])
+		localPortRaw := binary.LittleEndian.Uint32(buf[offset+8 : offset+12])
+		owningPid := binary.LittleEndian.Uint32(buf[offset+20 : offset+24])
+
+		// Advance offset for next iteration
+		offset += rowSize
+
+		// Port conversion (Network Byte Order in low 16 bits)
+		localPort := uint16(localPortRaw & 0xFFFF)
+		localPort = (localPort>>8)&0xFF | (localPort&0xFF)<<8
+
+		if localPort == port {
+			// Convert DWORD IP (little-endian) to net.IP
+			entryIP := net.IPv4(
+				byte(localAddrRaw&0xFF),
+				byte((localAddrRaw>>8)&0xFF),
+				byte((localAddrRaw>>16)&0xFF),
+				byte((localAddrRaw>>24)&0xFF),
+			)
+
+			// Match logic (Wildcard 0.0.0.0 or specific IP)
+			if entryIP.Equal(net.IPv4zero) || entryIP.Equal(ip4) {
+				exe, err := ExePathFromPID(owningPid)
+				if err != nil {
+					// Fallback to process name if path is inaccessible
+					var err2 error
+					exe, err2 = GetProcessName(owningPid)
+					if err2 != nil {
+						return 0, "", fmt.Errorf("pid %d found but exe lookup failed: %w", owningPid, err2)
+					}
+				}
+				return owningPid, exe, nil
+			}
+		}
+	}
+
+	return 0, "", fmt.Errorf("no TCP owner found for %s", clientAddr.String())
 }
