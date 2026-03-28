@@ -36,6 +36,7 @@ var (
 	Iphlpapi = windows.NewLazySystemDLL("iphlpapi.dll")
 	//procGetExtendedUdpTable = Iphlpapi.NewProc("GetExtendedUdpTable")
 	callGetExtendedUdpTable = NewBoundProc(Iphlpapi, "GetExtendedUdpTable", CheckErrno)
+	callGetExtendedTcpTable = NewBoundProc(Iphlpapi, "GetExtendedTcpTable", CheckErrno)
 
 	Kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
@@ -225,6 +226,22 @@ func GetExtendedUDPTable(order bool, family uint32) ([]byte, error) {
 			boolToUintptr(order),
 			uintptr(family),
 			uintptr(UDP_TABLE_OWNER_PID),
+			0,
+		)
+		return err
+	})
+}
+
+// GetExtendedTCPTable retrieves the system TCP table.
+// It follows the same contract as GetExtendedUDPTable.
+func GetExtendedTCPTable(order bool, family uint32) ([]byte, error) {
+	return callWithRetry(0, func(p uintptr, s *uint32) error {
+		_, _, err := callGetExtendedTcpTable(
+			p,
+			uintptr(unsafe.Pointer(s)),
+			boolToUintptr(order),
+			uintptr(family),
+			uintptr(TCP_TABLE_OWNER_PID_ALL), // Value 5: Get all states + PID
 			0,
 		)
 		return err
