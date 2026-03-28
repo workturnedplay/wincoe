@@ -159,10 +159,21 @@ func callWithRetry(initialSize uint32, call func(p uintptr, s *uint32) error) ([
 			return buf, nil
 		}
 
-		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+		// Windows uses both INSUFFICIENT_BUFFER and MORE_DATA
+		// to signal that we need a bigger boat.
+		//GetExtendedUdpTable usually returns ERROR_INSUFFICIENT_BUFFER when the buffer is too small.
+		//EnumServicesStatusEx (and many Enumeration APIs) returns ERROR_MORE_DATA.
+		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) &&
+			!errors.Is(err, windows.ERROR_MORE_DATA) {
 			return nil, err
 		}
 		// Loop continues, using the updated 'size' from the failed call
+		//however:
+		// If size didn't increase but we still got an error,
+		// we should nudge it upward to prevent an infinite loop.
+		if size <= uint32(len(buf)) {
+			size += 1024
+		}
 	}
 	return nil, fmt.Errorf("buffer growth exceeded max retries(%d)", MAX_RETRIES)
 }
@@ -398,4 +409,86 @@ func Process32First(snapshot windows.Handle, entry *windows.ProcessEntry32) erro
 func Process32Next(snapshot windows.Handle, entry *windows.ProcessEntry32) error {
 	_, _, err := callProcess32Next(uintptr(snapshot), uintptr(unsafe.Pointer(entry)))
 	return err
+}
+
+// GetServiceNamesFromPID queries the Service Control Manager to find all service
+// names currently associated with a specific Process ID (PID).
+//
+// This function encapsulates:
+//   - opening a remote handle to the SCM with SC_MANAGER_ENUMERATE_SERVICE rights
+//   - utilizing callWithRetry to handle the "snapshot" race condition where the
+//     number of services changes between the size query and the data fetch
+//   - parsing the resulting ENUM_SERVICE_STATUS_PROCESS structure array
+//
+// Returns a slice of service display names associated with the PID. If no
+// services are found for the given PID, it returns (nil, nil).
+//
+// Guarantees:
+//   - returns a non-nil error if SCM access is denied or the RPC call fails
+//   - handles ERROR_INSUFFICIENT_BUFFER internally via the retry loop
+//   - ensures the SCM handle is closed via defer, even on internal retry failure
+//
+// Edge cases handled:
+//   - services starting/stopping mid-enumeration (handled by 10-try retry logic)
+//   - PIDs with zero associated services (returns nil slice, no error)
+//   - stale resume handles (reset to 0 on each retry for a fresh full snapshot)
+//   - race conditions where the service list grows mid-call (handled by treating ERROR_MORE_DATA as a retry signal)
+//
+// Note:
+//   - This performs a full enumeration of all Win32 services to filter by PID;
+//     on systems with hundreds of services, this may involve a ~100KB+ buffer.
+func GetServiceNamesFromPID(targetPID uint32) ([]string, error) {
+	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ENUMERATE_SERVICE)
+	if err != nil {
+		return nil, fmt.Errorf("OpenSCManager failed: %w", err)
+	}
+	defer windows.CloseServiceHandle(scm)
+
+	// We'll need these to persist across the closure calls
+	var servicesReturned uint32
+
+	// Use our retry helper to handle the buffer growth logic
+	// We use callWithRetry because the service list is highly volatile.
+	buffer, err := callWithRetry(0, func(p uintptr, s *uint32) error {
+		// Reset these for each attempt to ensure a fresh enumeration if it retries
+		servicesReturned = 0
+		// Note: we usually keep resumeHandle at 0 for a fresh start on each retry
+		// unless we are specifically doing paged enumeration.
+		var currentResumeHandle uint32
+
+		errEnum := windows.EnumServicesStatusEx(
+			scm,
+			windows.SC_ENUM_PROCESS_INFO,
+			windows.SERVICE_WIN32,
+			windows.SERVICE_STATE_ALL,
+			(*byte)(unsafe.Pointer(p)),
+			*s,
+			s, // bytesNeeded
+			&servicesReturned,
+			&currentResumeHandle,
+			nil,
+		)
+		return errEnum
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("EnumServicesStatusEx failed: %w", err)
+	}
+
+	// Parsing logic remains the same, but now it's protected by the retry logic
+	var serviceNames []string
+	entrySize := unsafe.Sizeof(windows.ENUM_SERVICE_STATUS_PROCESS{})
+
+	for i := uint32(0); i < servicesReturned; i++ {
+		offset := uintptr(i) * entrySize
+		data := (*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buffer[offset]))
+
+		if data.ServiceStatusProcess.ProcessId == targetPID {
+			// We use UTF16PtrToString because ServiceName is a *uint16
+			// pointing into the same buffer returned by the API.
+			serviceNames = append(serviceNames, windows.UTF16PtrToString(data.ServiceName))
+		}
+	}
+
+	return serviceNames, nil
 }
