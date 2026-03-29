@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -135,12 +136,79 @@ const UnspecifiedWinApi string = "unspecified_winapi"
 // failure checker. It returns r1, r2, and an error that is never nil when r1 indicates failure.
 //
 // This version accepts any type that implements LazyProcish, which allows easy mocking in tests.
-func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) (uintptr, uintptr, error) {
+func WinCall(proc LazyProcish, check WinCheckFunc, args ...any) (uintptr, uintptr, error) {
+	if proc == nil {
+		//return 0, 0,
+		panic(fmt.Errorf("WinCall: nil proc"))
+	}
+
 	op := strings.TrimSpace(proc.Name())
 	if op == "" {
 		op = UnspecifiedWinApi
 	}
-	r1, r2, callErr := proc.Call(args...)
+
+	//XXX: to be clear, THIS isn't good enough either! I'd have to cast to uintptr in the .Call() args instead! which means separate func for each, no WinCall possible! Or maybe there's a way via //go:uintptrescapes
+	// Prepare the raw uintptr arguments for the real syscall
+	uintArgs := make([]uintptr, len(args))
+
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case uintptr:
+			//uintArgs[i] = v
+			panic(fmt.Errorf("WinCall: No uintptrs allowed at index %d for %q windows call", i, op))
+		case unsafe.Pointer:
+			uintArgs[i] = uintptr(v) // Convert at the LAST possible moment
+
+		case int:
+			uintArgs[i] = uintptr(v)
+		case int16:
+			uintArgs[i] = uintptr(v)
+		case int32:
+			uintArgs[i] = uintptr(v)
+		case int64:
+			uintArgs[i] = uintptr(v)
+
+		case uint:
+			uintArgs[i] = uintptr(v)
+		case uint32:
+			uintArgs[i] = uintptr(v)
+		case uint16:
+			uintArgs[i] = uintptr(v)
+		case uint64:
+			uintArgs[i] = uintptr(v)
+
+		case windows.Handle:
+			uintArgs[i] = uintptr(v)
+		case bool:
+			if v {
+				uintArgs[i] = 1
+			} else {
+				uintArgs[i] = 0
+			}
+
+		case *uint8:
+			uintArgs[i] = uintptr(unsafe.Pointer(v))
+		case *uint16:
+			uintArgs[i] = uintptr(unsafe.Pointer(v))
+		case *uint32:
+			uintArgs[i] = uintptr(unsafe.Pointer(v))
+		case *uint64:
+			uintArgs[i] = uintptr(unsafe.Pointer(v))
+
+		// If you have a custom struct, you'll need its pointer type here too
+		case *windows.ProcessEntry32:
+			uintArgs[i] = uintptr(unsafe.Pointer(v))
+
+		default:
+			// If it's a pointer but not cast to unsafe.Pointer yet
+			// we can use reflection as a fallback(but we shouldn't as it will trigger GC), but unsafe.Pointer is faster
+			panic(fmt.Errorf("TODO: WinCall: unsupported argument type %T at index %d for %q windows call", arg, i, op))
+		}
+	}
+
+	// This is the "Danger Zone" - we have converted to uintptr.
+	// We must call proc.Call IMMEDIATELY.
+	r1, r2, callErr := proc.Call(uintArgs...)
 	err := CheckWinResult(op, check, r1, callErr)
 	return r1, r2, err
 }
@@ -211,8 +279,8 @@ func RealProc2(dll *windows.LazyDLL, name string) LazyProcish {
 	return RealProc(dll.NewProc(name))
 }
 
-// WinCall will handle the error type properly, wrap it nicely so if err != nil you can then always do errors.Is on it!
 // BoundFunc represents a bound Windows procedure call with fixed failure semantics.
+// WinCall will handle the error type properly, wrap it nicely so if err != nil you can then always do errors.Is on it!
 //
 // It behaves like a preconfigured syscall wrapper:
 //   - accepts raw uintptr arguments
@@ -225,7 +293,7 @@ func RealProc2(dll *windows.LazyDLL, name string) LazyProcish {
 //
 // BoundFunc makes no guarantees about argument arity or type safety beyond what
 // the underlying Windows API expects.
-type BoundFunc func(args ...uintptr) (uintptr, uintptr, error)
+type BoundFunc func(args ...any) (uintptr, uintptr, error)
 
 // BindFunc binds a LazyProcish together with a WinCheckFunc into a callable function.
 //
@@ -254,7 +322,7 @@ func BindFunc(proc LazyProcish, check WinCheckFunc) BoundFunc {
 		panic("BindFunc: nil check")
 	}
 
-	return func(args ...uintptr) (uintptr, uintptr, error) {
+	return func(args ...any) (uintptr, uintptr, error) {
 		return WinCall(proc, check, args...)
 	}
 }
@@ -299,7 +367,7 @@ func NewBoundProc(
 
 	proc := RealProc(dll.NewProc(name))
 
-	return func(args ...uintptr) (uintptr, uintptr, error) {
+	return func(args ...any) (uintptr, uintptr, error) {
 		return WinCall(proc, check, args...)
 	}
 }
