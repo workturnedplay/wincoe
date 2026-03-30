@@ -15,6 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// If you ever add a new Windows API call to winapi.go, you must remember to do the uintptr(unsafe.Pointer(&myVar))
+// conversion directly inside the procName.Call(...) argument list. If you assign it to a variable first and pass that variable,
+// the compiler shield(//go:uintptrescapes) drops.
 package wincoe
 
 import (
@@ -37,8 +40,8 @@ import (
 var (
 	Iphlpapi = windows.NewLazySystemDLL("iphlpapi.dll")
 	//procGetExtendedUdpTable = Iphlpapi.NewProc("GetExtendedUdpTable")
-	callGetExtendedUdpTable = NewBoundProc(Iphlpapi, "GetExtendedUdpTable", CheckErrno)
-	callGetExtendedTcpTable = NewBoundProc(Iphlpapi, "GetExtendedTcpTable", CheckErrno)
+	procGetExtendedUdpTable = NewBoundProc(Iphlpapi, "GetExtendedUdpTable", CheckErrno)
+	procGetExtendedTcpTable = NewBoundProc(Iphlpapi, "GetExtendedTcpTable", CheckErrno)
 
 	Kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
@@ -46,13 +49,13 @@ var (
 	//
 	// Note: QueryFullProcessNameW expects 'size' to include the null terminator
 	// on input, and returns the length WITHOUT the null terminator on success.
-	callQueryFullProcessName = NewBoundProc(Kernel32, "QueryFullProcessImageNameW", CheckBool)
+	procQueryFullProcessName = NewBoundProc(Kernel32, "QueryFullProcessImageNameW", CheckBool)
 	// procCreateToolhelp32Snapshot = Kernel32.NewProc("CreateToolhelp32Snapshot")
-	callCreateToolhelp32Snapshot = NewBoundProc(Kernel32, "CreateToolhelp32Snapshot", CheckHandle)
+	procCreateToolhelp32Snapshot = NewBoundProc(Kernel32, "CreateToolhelp32Snapshot", CheckHandle)
 	// procProcess32First           = Kernel32.NewProc("Process32FirstW")
-	callProcess32First = NewBoundProc(Kernel32, "Process32FirstW", CheckBool)
+	procProcess32First = NewBoundProc(Kernel32, "Process32FirstW", CheckBool)
 	// procProcess32Next            = Kernel32.NewProc("Process32NextW")
-	callProcess32Next = NewBoundProc(Kernel32, "Process32NextW", CheckBool)
+	procProcess32Next = NewBoundProc(Kernel32, "Process32NextW", CheckBool)
 )
 
 // auto runs before main(), loads the DLLs non-lazily.
@@ -197,6 +200,8 @@ func callWithRetry(initialSize uint32, call func(bufPtr *byte, s *uint32) error)
 // boolToUintptr performs an explicit conversion from a Go bool to a
 // Windows-compatible BOOL (uintptr(1) for true, uintptr(0) for false).
 // This is required because Go bools cannot be directly cast to numeric types.
+//
+//go:inline
 func boolToUintptr(b bool) uintptr {
 	if b {
 		return 1
@@ -232,22 +237,22 @@ func boolToUintptr(b bool) uintptr {
 //     to a specific struct layout; build a typed parser on top if needed.
 func GetExtendedUDPTable(order bool, family uint32) ([]byte, error) {
 	return callWithRetry(0, func(bufPtr *byte, s *uint32) error {
-		// _, _, err := callGetExtendedUdpTable(
-		// 	uintptr(unsafe.Pointer(bufPtr)),
-		// 	uintptr(unsafe.Pointer(s)),
-		// 	boolToUintptr(order),
-		// 	uintptr(family),
-		// 	uintptr(UDP_TABLE_OWNER_PID),
-		// 	0,
-		// )
-		_, _, err := callGetExtendedUdpTable(
-			bufPtr,
-			s,
-			order,
-			family,
-			UDP_TABLE_OWNER_PID,
+		_, _, err := procGetExtendedUdpTable.Call(
+			uintptr(unsafe.Pointer(bufPtr)),
+			uintptr(unsafe.Pointer(s)),
+			boolToUintptr(order),
+			uintptr(family),
+			uintptr(UDP_TABLE_OWNER_PID),
 			0,
 		)
+		// _, _, err := callGetExtendedUdpTable(
+		// 	bufPtr,
+		// 	s,
+		// 	order,
+		// 	family,
+		// 	UDP_TABLE_OWNER_PID,
+		// 	0,
+		// )
 		return err
 	})
 }
@@ -256,22 +261,22 @@ func GetExtendedUDPTable(order bool, family uint32) ([]byte, error) {
 // It follows the same contract as GetExtendedUDPTable.
 func GetExtendedTCPTable(order bool, family uint32) ([]byte, error) {
 	return callWithRetry(0, func(bufPtr *byte, s *uint32) error {
-		// _, _, err := callGetExtendedTcpTable(
-		// 	uintptr(unsafe.Pointer(bufPtr)),
-		// 	uintptr(unsafe.Pointer(s)),
-		// 	boolToUintptr(order),
-		// 	uintptr(family),
-		// 	uintptr(TCP_TABLE_OWNER_PID_ALL), // Value 5: Get all states + PID
-		// 	0,
-		// )
-		_, _, err := callGetExtendedTcpTable(
-			bufPtr,
-			s,
-			order,
-			family,
-			TCP_TABLE_OWNER_PID_ALL, // Value 5: Get all states + PID
+		_, _, err := procGetExtendedTcpTable.Call(
+			uintptr(unsafe.Pointer(bufPtr)),
+			uintptr(unsafe.Pointer(s)),
+			boolToUintptr(order),
+			uintptr(family),
+			uintptr(TCP_TABLE_OWNER_PID_ALL), // Value 5: Get all states + PID
 			0,
 		)
+		// _, _, err := callGetExtendedTcpTable(
+		// 	bufPtr,
+		// 	s,
+		// 	order,
+		// 	family,
+		// 	TCP_TABLE_OWNER_PID_ALL, // Value 5: Get all states + PID
+		// 	0,
+		// )
 		return err
 	})
 }
@@ -309,18 +314,18 @@ func QueryFullProcessName(pid uint32) (string, error) {
 
 		// Note: QueryFullProcessNameW expects 'size' to include the null terminator
 		// on input, and returns the length WITHOUT the null terminator on success.
-		_, _, err = callQueryFullProcessName(
-			h,
-			0,
-			&buf[0],
-			&size,
-		)
 		// _, _, err = callQueryFullProcessName(
-		// 	uintptr(h),
+		// 	h,
 		// 	0,
-		// 	uintptr(unsafe.Pointer(&buf[0])),
-		// 	uintptr(unsafe.Pointer(&size)),
+		// 	&buf[0],
+		// 	&size,
 		// )
+		_, _, err = procQueryFullProcessName.Call(
+			uintptr(h),
+			0,
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(unsafe.Pointer(&size)),
+		)
 
 		if err == nil {
 			// Success! Convert the returned size to string
@@ -432,14 +437,14 @@ func GetProcessName(pid uint32) (string, error) {
 // If a flag isn’t used (e.g., you don’t include TH32CS_SNAPPROCESS), CreateToolhelp32Snapshot will not include that object type in the snapshot.
 // TH32CS_SNAPPROCESS specifically tells the API to include all processes in the snapshot. Without it, Process32First/Process32Next won’t enumerate any processes.
 func CreateToolhelp32Snapshot(dwFlags, th32ProcessID uint32) (windows.Handle, error) {
-	r1, _, err := callCreateToolhelp32Snapshot(
-		dwFlags,
-		th32ProcessID,
-	)
 	// r1, _, err := callCreateToolhelp32Snapshot(
-	// 	uintptr(dwFlags),
-	// 	uintptr(th32ProcessID),
+	// 	dwFlags,
+	// 	th32ProcessID,
 	// )
+	r1, _, err := procCreateToolhelp32Snapshot.Call(
+		uintptr(dwFlags),
+		uintptr(th32ProcessID),
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -456,15 +461,15 @@ func CreateToolhelp32Snapshot(dwFlags, th32ProcessID uint32) (windows.Handle, er
 
 // Process32First wraps callProcess32First.
 func Process32First(snapshot windows.Handle, entry *windows.ProcessEntry32) error {
-	//_, _, err := callProcess32First(uintptr(snapshot), uintptr(unsafe.Pointer(entry)))
-	_, _, err := callProcess32First(snapshot, entry)
+	_, _, err := procProcess32First.Call(uintptr(snapshot), uintptr(unsafe.Pointer(entry)))
+	//_, _, err := callProcess32First(snapshot, entry)
 	return err
 }
 
 // Process32Next wraps callProcess32Next.
 func Process32Next(snapshot windows.Handle, entry *windows.ProcessEntry32) error {
-	//_, _, err := callProcess32Next(uintptr(snapshot), uintptr(unsafe.Pointer(entry)))
-	_, _, err := callProcess32Next(snapshot, entry)
+	_, _, err := procProcess32Next.Call(uintptr(snapshot), uintptr(unsafe.Pointer(entry)))
+	//_, _, err := callProcess32Next(snapshot, entry)
 	return err
 }
 
