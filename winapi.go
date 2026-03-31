@@ -155,14 +155,24 @@ func callWithRetry(initialSize uint32, call func(bufPtr *byte, s *uint32) error)
 		// If size is 0, we're just probing. If > 0, we're allocating.
 		var buf []byte
 		//var p uintptr
-		var ptr *byte
+		var ptr *byte = nil //implied anyway
+		const canary uint64 = 0xDEADBEEFCAFEBABE
+		var canaryOffset int
 		if size > 0 {
-			buf = make([]byte, size)
-			//p = uintptr(unsafe.Pointer(&buf[0]))
+			buf = make([]byte, size+8) // 8 extra bytes
+			canaryOffset = len(buf) - 8
+			// write canary at the end
+			binary.LittleEndian.PutUint64(buf[canaryOffset:], canary)
 			ptr = &buf[0] // Keep it as a real, GC-visible pointer
 		}
 
 		err := call(ptr, &size)
+		//check canary immediately after
+		if buf != nil { // guard for first iteration when size==0
+			if binary.LittleEndian.Uint64(buf[canaryOffset:]) != canary {
+				panic(fmt.Sprintf("CANARY SMASHED in callWithRetry after call, allocSize=%d, apiReportedSize=%d", canaryOffset, size))
+			}
+		}
 		if err == nil {
 			return buf, nil
 		}
@@ -500,6 +510,7 @@ func Process32Next(snapshot windows.Handle, entry *windows.ProcessEntry32) error
 //   - This performs a full enumeration of all Win32 services to filter by PID;
 //     on systems with hundreds of services, this may involve a ~100KB+ buffer.
 func GetServiceNamesFromPID(targetPID uint32) ([]string, error) {
+	//TODO: since makeClientInfoContext is called on every single packet, and GetServiceNamesFromPID opens the SCM, enumerates all services, and does unsafe parsing — all under high concurrent load — you might consider caching the PID→services mapping with a short TTL to reduce both the performance impact and the attack surface of concurrent unsafe calls.
 	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ENUMERATE_SERVICE)
 	if err != nil {
 		return nil, fmt.Errorf("OpenSCManager failed: %w", err)
@@ -541,6 +552,12 @@ func GetServiceNamesFromPID(targetPID uint32) ([]string, error) {
 	// Parsing logic remains the same, but now it's protected by the retry logic
 	var serviceNames []string
 	entrySize := unsafe.Sizeof(windows.ENUM_SERVICE_STATUS_PROCESS{})
+
+	//this 'if' suggested by Claude Sonnet 4.6: (i DRY-ed the 'foo')
+	if foo := uint64(servicesReturned) * uint64(entrySize); foo > uint64(len(buffer)) {
+		return nil, fmt.Errorf("servicesReturned(%d) * entrySize(%d) = %d exceeds buffer len(%d): API invariant violated",
+			servicesReturned, entrySize, foo, len(buffer))
+	}
 
 	for i := uint32(0); i < servicesReturned; i++ {
 		offset := uintptr(i) * entrySize
@@ -585,14 +602,13 @@ func PidAndExeForUDP(clientAddr *net.UDPAddr) (uint32, string, error) {
 	num := binary.LittleEndian.Uint32(buf[:4])
 	const rowSize = 12 // MIB_UDPROW_OWNER_PID has 3 DWORDs = 12 bytes
 	offset := 4
+	//var owningPid uint32
 	for i := uint32(0); i < num; i++ {
 		if offset+rowSize > len(buf) {
 			break
 		}
 		localAddr := binary.LittleEndian.Uint32(buf[offset : offset+4])
 		localPortRaw := binary.LittleEndian.Uint32(buf[offset+4 : offset+8])
-		owningPid := binary.LittleEndian.Uint32(buf[offset+8 : offset+12])
-		offset += rowSize
 
 		// localPortRaw stores port in network byte order in low 16 bits.
 		localPort := uint16(localPortRaw & 0xFFFF)
@@ -612,7 +628,8 @@ func PidAndExeForUDP(clientAddr *net.UDPAddr) (uint32, string, error) {
 		if localPort == port {
 			// treat 0.0.0.0 as wildcard match
 			if entryIP.Equal(net.IPv4zero) || entryIP.Equal(ip4) {
-				// found PID
+				// found PID for our IP:port tuple
+				owningPid := binary.LittleEndian.Uint32(buf[offset+8 : offset+12])
 				exe, err := ExePathFromPID(owningPid)
 				if err != nil {
 					//fmt.Println(err)
@@ -623,7 +640,7 @@ func PidAndExeForUDP(clientAddr *net.UDPAddr) (uint32, string, error) {
 					exe, err2 = GetProcessName(owningPid)
 
 					if err2 != nil {
-						return 0, "", fmt.Errorf("pid %d not found for %s, errTransient:'%v', err:'%w'", num, clientAddr.String(), err, err2)
+						return 0, "", fmt.Errorf("pid %d not found for %s, errTransient:'%v', err:'%w'", owningPid, clientAddr.String(), err, err2)
 					}
 
 					//_ = exe // enable when trying for shadowing
@@ -631,9 +648,12 @@ func PidAndExeForUDP(clientAddr *net.UDPAddr) (uint32, string, error) {
 				return owningPid, exe, nil
 			}
 		}
-	}
 
-	return 0, "", fmt.Errorf("pid %d not found for %s", num, clientAddr.String())
+		//prepare for next entry
+		offset += rowSize
+	} //for
+
+	return 0, "", fmt.Errorf("no matching UDP socket entry found for %s (ephemeral port reuse or socket already closed by kernel) thus dno who sent it", clientAddr.String())
 }
 
 // clientAddr should be the remote TCP address observed on the server side (e.g., 127.0.0.1:49936).
