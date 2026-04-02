@@ -75,7 +75,10 @@ func CheckWinResult(
 	r1 uintptr,
 	callErr error,
 ) error {
+	fmt.Printf("starting CheckWinResult for %s\n", operationNameToIncludeInErrorMessages)
+	Smashy()
 	if !isFailure(r1) {
+		fmt.Printf("ending   CheckWinResult for %s with SUCCESS.\n", operationNameToIncludeInErrorMessages)
 		// Success: return nil so 'if err != nil' behaves normally.
 		return nil
 	}
@@ -90,15 +93,17 @@ func CheckWinResult(
 		// Many Win32 APIs (e.g. GetExtendedUdpTable) return the error in r1.
 		// Only treat r1 as an errno if it's non-zero.
 		if r1 != 0 {
-			errno := windows.Errno(r1)
+			errno := windows.Errno(r1) //TODO: see how we can match against this, I doubt errors.Is still works for this! actually, it seems to based on the below!
 
 			// Defensive: avoid ever wrapping ERROR_SUCCESS
 			if !errors.Is(errno, windows.ERROR_SUCCESS) {
+				fmt.Printf("ending   CheckWinResult for %s with Errno: %w\n", operationNameToIncludeInErrorMessages, errno)
 				// since r1 != 0 already, this is bound to never be ERROR_SUCCESS here, unless r1 != 0 can ever be ERROR_SUCCESS, unsure.
 				return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, errno)
 			}
 		}
 
+		fmt.Printf("ending   CheckWinResult for %s with truly unknown failure: ret=%d\n", operationNameToIncludeInErrorMessages, r1)
 		// Fallback: truly unknown failure
 		return fmt.Errorf(
 			"%q windows call reported failure (ret=%d) but no usable error was provided",
@@ -107,6 +112,7 @@ func CheckWinResult(
 		)
 	}
 
+	fmt.Printf("ending   CheckWinResult for %s with normal callErr: %w\n", operationNameToIncludeInErrorMessages, callErr)
 	// Normal path: we have a meaningful callErr
 	return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, callErr)
 
@@ -494,11 +500,14 @@ func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) (uintptr, ui
 	if op == "" {
 		op = UnspecifiedWinApi
 	}
+	fmt.Printf("starting WinCall: %s\n", op)
 	Smashy()
 	// args is a []uintptr, but because of //go:uintptrescapes, the caller
 	// has already pinned the memory safely before we get here.
 	r1, r2, callErr := proc.Call(args...)
+	fmt.Printf("checking WinCall: %s\n", op)
 	err := CheckWinResult(op, check, r1, callErr)
+	fmt.Printf("ending   WinCall: %s\n", op)
 	return r1, r2, err
 }
 
