@@ -20,9 +20,8 @@ package wincoe
 import (
 	"errors"
 	"fmt"
-	//"runtime"
+	"runtime"
 	"strings"
-	//"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -495,10 +494,53 @@ func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) (uintptr, ui
 	if op == "" {
 		op = UnspecifiedWinApi
 	}
-
+	Smashy()
 	// args is a []uintptr, but because of //go:uintptrescapes, the caller
 	// has already pinned the memory safely before we get here.
 	r1, r2, callErr := proc.Call(args...)
 	err := CheckWinResult(op, check, r1, callErr)
 	return r1, r2, err
+}
+
+func Smashy() {
+	churn()
+	stackChurn(64) // grow stack
+	runtime.GC()   // encourage shrink afterwards
+	runtime.Gosched()
+	smashStack()
+}
+
+func smashStack() {
+	var big [65536]byte
+	for i := range big {
+		big[i] = 0xCC
+	}
+}
+
+func churn() {
+	var sink any
+	// Force GC + stack pressure
+	for i := 0; i < 100; i++ {
+		b := make([]byte, 1<<20) // 1MB
+		sink = b
+	}
+	_ = sink
+	//runtime.GC()
+}
+
+func stackChurn(depth int) {
+	if depth == 0 {
+		return
+	}
+
+	// Force a large stack frame (~8KB)
+	var buf [8192]byte
+	buf[0] = byte(depth) // prevent optimization
+
+	stackChurn(depth - 1)
+
+	// use again to avoid dead-store elimination
+	if buf[0] == 255 {
+		panic("impossible")
+	}
 }
