@@ -20,6 +20,7 @@ package wincoe
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 
@@ -75,10 +76,10 @@ func CheckWinResult(
 	r1 uintptr,
 	callErr error,
 ) error {
-	fmt.Printf("starting CheckWinResult for %s\n", operationNameToIncludeInErrorMessages)
-	Smashy()
+	fmt.Printf("[GoR:%d] !starting CheckWinResult for %s\n", GoRoutineId(), operationNameToIncludeInErrorMessages)
+	Smashy(true)
 	if !isFailure(r1) {
-		fmt.Printf("ending   CheckWinResult for %s with SUCCESS.\n", operationNameToIncludeInErrorMessages)
+		fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with SUCCESS.\n", GoRoutineId(), operationNameToIncludeInErrorMessages)
 		// Success: return nil so 'if err != nil' behaves normally.
 		return nil
 	}
@@ -97,13 +98,13 @@ func CheckWinResult(
 
 			// Defensive: avoid ever wrapping ERROR_SUCCESS
 			if !errors.Is(errno, windows.ERROR_SUCCESS) {
-				fmt.Printf("ending   CheckWinResult for %s with Errno: %w\n", operationNameToIncludeInErrorMessages, errno)
+				fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with Errno: %v\n", GoRoutineId(), operationNameToIncludeInErrorMessages, errno)
 				// since r1 != 0 already, this is bound to never be ERROR_SUCCESS here, unless r1 != 0 can ever be ERROR_SUCCESS, unsure.
 				return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, errno)
 			}
 		}
 
-		fmt.Printf("ending   CheckWinResult for %s with truly unknown failure: ret=%d\n", operationNameToIncludeInErrorMessages, r1)
+		fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with truly unknown failure: ret=%d\n", GoRoutineId(), operationNameToIncludeInErrorMessages, r1)
 		// Fallback: truly unknown failure
 		return fmt.Errorf(
 			"%q windows call reported failure (ret=%d) but no usable error was provided",
@@ -112,7 +113,7 @@ func CheckWinResult(
 		)
 	}
 
-	fmt.Printf("ending   CheckWinResult for %s with normal callErr: %w\n", operationNameToIncludeInErrorMessages, callErr)
+	fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with normal callErr: %v\n", GoRoutineId(), operationNameToIncludeInErrorMessages, callErr)
 	// Normal path: we have a meaningful callErr
 	return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, callErr)
 
@@ -500,23 +501,75 @@ func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) (uintptr, ui
 	if op == "" {
 		op = UnspecifiedWinApi
 	}
-	fmt.Printf("starting WinCall: %s\n", op)
-	Smashy()
+	fmt.Printf("[GoR:%d] !starting WinCall: %s\n", GoRoutineId(), op)
+	Smashy(true)
 	// args is a []uintptr, but because of //go:uintptrescapes, the caller
 	// has already pinned the memory safely before we get here.
 	r1, r2, callErr := proc.Call(args...)
-	fmt.Printf("checking WinCall: %s\n", op)
+	fmt.Printf("[GoR:%d] !checking WinCall: %s\n", GoRoutineId(), op)
 	err := CheckWinResult(op, check, r1, callErr)
-	fmt.Printf("ending   WinCall: %s\n", op)
+	fmt.Printf("[GoR:%d] !ending   WinCall: %s\n", GoRoutineId(), op)
 	return r1, r2, err
 }
 
-func Smashy() {
-	churn()
-	stackChurn(64) // grow stack
-	runtime.GC()   // encourage shrink afterwards
-	runtime.Gosched()
-	smashStack()
+func flush() {
+	//fmt.Printf("[GoR:%d] !flushing stderr\n", GoRoutineId())
+	os.Stderr.Sync() // Tell Windows to flush the file buffers to disk/console
+	//fmt.Printf("[GoR:%d] !flushing stdout\n", GoRoutineId())
+	os.Stdout.Sync() // Tell Windows to flush the file buffers to disk/console
+}
+func Smashy(log bool) {
+	if _, exists := os.LookupEnv("WINCOE_SMASHY_TEST"); exists { // only for deliberate stress testing
+		if log {
+			fmt.Printf("[GoR:%d] !starting Smashy\n", GoRoutineId())
+			fmt.Printf("[GoR:%d] ! starting churn()\n", GoRoutineId())
+			flush()
+		}
+		Churn()
+		if log {
+			fmt.Printf("[GoR:%d] ! ending churn()\n", GoRoutineId())
+			fmt.Printf("[GoR:%d] ! starting stackChurn(64)\n", GoRoutineId())
+			flush()
+		}
+
+		stackChurn(64) // grow stack
+		if log {
+			fmt.Printf("[GoR:%d] ! ending stackChurn(64)\n", GoRoutineId())
+			flush()
+		}
+
+		if _, exists2 := os.LookupEnv("WINCOE_SMASHY_RUNGC"); exists2 {
+			if log {
+				fmt.Printf("[GoR:%d] ! before runtime.GC()\n", GoRoutineId())
+				flush()
+			}
+			runtime.GC() // encourage shrink afterwards
+			if log {
+				fmt.Printf("[GoR:%d] ! after runtime.GC()\n", GoRoutineId())
+				flush()
+			}
+			if log {
+				fmt.Printf("[GoR:%d] ! before runtime.Gosched()\n", GoRoutineId())
+				flush()
+			}
+			runtime.Gosched()
+			if log {
+				fmt.Printf("[GoR:%d] ! after runtime.Gosched()\n", GoRoutineId())
+				flush()
+			}
+		} //if
+
+		if log {
+			fmt.Printf("[GoR:%d] ! starting smashStack\n", GoRoutineId())
+			flush()
+		}
+		smashStack()
+		if log {
+			fmt.Printf("[GoR:%d] ! ending smashStack\n", GoRoutineId())
+			fmt.Printf("[GoR:%d] !ending Smashy\n", GoRoutineId())
+			flush()
+		}
+	}
 }
 
 func smashStack() {
@@ -526,7 +579,7 @@ func smashStack() {
 	}
 }
 
-func churn() {
+func Churn() {
 	var sink any
 	// Force GC + stack pressure
 	for i := 0; i < 100; i++ {
@@ -534,7 +587,15 @@ func churn() {
 		sink = b
 	}
 	_ = sink
-	//runtime.GC()
+}
+func Churn2() {
+	var sink any
+	// Force GC + stack pressure
+	for i := 0; i < 1000; i++ {
+		b := make([]byte, 1<<20) // 1MB
+		sink = b
+	}
+	_ = sink
 }
 
 func stackChurn(depth int) {

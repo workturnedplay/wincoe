@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	//"os"
 	"runtime"
 	"sync"
 	"time"
@@ -157,7 +158,7 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 	for tries := 1; tries <= MAX_RETRIES; tries++ { // tries will be 1, 2, 3, ..., MAX_RETRIES
 		//for tries := 0; tries < MAX_RETRIES; tries++ { // tries will be 0, 1, 2, ..., MAX_RETRIES-1
 		//for tries := range MAX_RETRIES { // tries will be 0, 1, 2, ..., MAX_RETRIES-1
-		fmt.Printf("!%s before6 try %d, initialSize=%d size=%d\n", who, tries, initialSize, size)
+		fmt.Printf("[GoR:%d]!%s before6 try %d, initialSize=%d size=%d\n", GoRoutineId(), who, tries, initialSize, size)
 		// If size is 0, we're just probing. If > 0, we're allocating.
 		var buf []byte
 		//var p uintptr
@@ -184,13 +185,13 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 					use fmt.Printf("%p", unsafe.Pointer(&buf[0])) (only when len>0).
 
 			*/
-			fmt.Printf("!%s middle7(created buf) try %d, buf=%p ptr=%p size=%d len(buf)=%d\n", who, tries, buf, ptr, size, len(buf))
+			fmt.Printf("[GoR:%d]!%s middle7(created buf) try %d, buf=%p ptr=%p size=%d len(buf)=%d\n", GoRoutineId(), who, tries, buf, ptr, size, len(buf))
 		}
-		fmt.Printf("!%s before7 try %d, ptr=%p &size=%p size=%d\n", who, tries, ptr, &size, size)
+		fmt.Printf("[GoR:%d]!%s before7 try %d, ptr=%p &size=%p size=%d\n", GoRoutineId(), who, tries, ptr, &size, size)
 		err := call(ptr, &size)
 		runtime.KeepAlive(buf)   // probably not needed but hey, ChatGPT.
-		runtime.KeepAlive(&size) // to satisfy Gemini 3.1 Thinking, no effect, still crashed.
-		fmt.Printf("!%s after7 try %d, ptr=%p &size=%p size=%d\n", who, tries, ptr, &size, size)
+		runtime.KeepAlive(&size) // to satisfy Gemini 3.1 Thinking, no effect, still crashed. (cause was this https://github.com/golang/go/issues/77975 )
+		fmt.Printf("[GoR:%d]!%s after7 try %d, ptr=%p &size=%p size=%d\n", GoRoutineId(), who, tries, ptr, &size, size)
 		// //check canary immediately after
 		// if buf != nil { // guard for first iteration when size==0
 		// 	if binary.LittleEndian.Uint64(buf[canaryOffset:]) != canary {
@@ -198,7 +199,7 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 		// 	}
 		// }
 		if err == nil {
-			fmt.Printf("!%s middle7(ret ok) try %d, buf=%p len(buf)=%d size=%d\n", who, tries, buf, len(buf), size)
+			fmt.Printf("[GoR:%d]!%s middle7(ret ok) try %d, buf=%p len(buf)=%d size=%d\n", GoRoutineId(), who, tries, buf, len(buf), size)
 			if uint64(size) > uint64(len(buf)) {
 				panic("impossible: size is bigger than len(buf)")
 			}
@@ -212,7 +213,7 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 		//EnumServicesStatusEx (and many Enumeration APIs) returns ERROR_MORE_DATA.
 		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) &&
 			!errors.Is(err, windows.ERROR_MORE_DATA) {
-			fmt.Printf("!%s middle7_2(ret err) try %d, err=%v\n", who, tries, err)
+			fmt.Printf("[GoR:%d]!%s middle7_2(ret err) try %d, err=%v\n", GoRoutineId(), who, tries, err)
 			return nil, err
 		}
 		// Loop continues, using the updated 'size' from the failed call
@@ -222,18 +223,18 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 		// We use uint64 casts to satisfy gosec G115.
 		// 1. Convert both to uint64 to compare safely without narrowing (Fixes G115)
 		if uint64(size) <= uint64(len(buf)) {
-			fmt.Printf("!%s before8 try %d, size=%d buf=%p len(buf)=%d\n", who, tries, size, buf, len(buf))
+			fmt.Printf("[GoR:%d]!%s before8 try %d, size=%d buf=%p len(buf)=%d\n", GoRoutineId(), who, tries, size, buf, len(buf))
 			// 2. Check for overflow before adding 1024
 			const increment = 1024
 			const MaxInt = math.MaxUint32
 			if MaxInt-size < increment {
-				fmt.Printf("!%s middle8 try %d\n", who, tries)
+				fmt.Printf("[GoR:%d]!%s middle8 try %d\n", GoRoutineId(), who, tries)
 				return nil, fmt.Errorf("buffer size(%d) would overflow uint32(%d) if adding %d", size, MaxInt, increment)
 			}
 			size += increment
-			fmt.Printf("!%s after8 try %d, new size=%d\n", who, tries, size)
+			fmt.Printf("[GoR:%d]!%s after8 try %d, new size=%d\n", GoRoutineId(), who, tries, size)
 		}
-		fmt.Printf("!%s after6(end of for) try %d\n", who, tries)
+		fmt.Printf("[GoR:%d]!%s after6(end of for) try %d\n", GoRoutineId(), who, tries)
 	}
 	return nil, fmt.Errorf("buffer growth exceeded max retries(%d)", MAX_RETRIES)
 }
@@ -329,10 +330,10 @@ func GetExtendedTCPTable(order bool, family uint32) ([]byte, error) {
 //
 // Returns a non-empty string and nil error on success, or an empty string with error on failure.
 func QueryFullProcessName(pid uint32) (string, error) {
-	fmt.Printf("starting QueryFullProcessName pid=%d\n", pid)
+	fmt.Printf("[GoR:%d] !starting QueryFullProcessName pid=%d\n", GoRoutineId(), pid)
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
-		fmt.Printf("returning from QueryFullProcessName err=%v\n", err)
+		fmt.Printf("[GoR:%d] !returning from QueryFullProcessName err=%v\n", GoRoutineId(), err)
 		return "", fmt.Errorf("OpenProcess failedfor PID %d: %w", pid, err)
 	}
 	defer windows.CloseHandle(h)
@@ -374,14 +375,14 @@ func QueryFullProcessName(pid uint32) (string, error) {
 			// Success! Convert the returned size to string
 			//UTF16ToString is a function that looks for a 0x0000 (null).
 			//size is just a number the API handed back, so let's not trust it, thus use full 'buf'
-			fmt.Printf("returning from QueryFullProcessName OK\n")
+			fmt.Printf("[GoR:%d] !returning from QueryFullProcessName OK\n", GoRoutineId())
 			return windows.UTF16ToString(buf), nil
 		}
 
 		// Check if the error is specifically "Buffer too small"
 		// syscall.ERROR_INSUFFICIENT_BUFFER = 0x7A
 		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
-			fmt.Printf("returning from QueryFullProcessName err=failed after %d tries\n", tries)
+			fmt.Printf("[GoR:%d] !returning from QueryFullProcessName err=failed after %d tries\n", GoRoutineId(), tries)
 			return "", fmt.Errorf("QueryFullProcessNameW failed after %d tries, err: '%w'", tries, err)
 		}
 		//else the desired 'size' now includes the nul terminator, so no need to +1 it
@@ -401,7 +402,7 @@ func QueryFullProcessName(pid uint32) (string, error) {
 
 		// Stern check against the Windows limit (32767) and the uint32 limit.
 		if nextSize > MaxExtendedPath || nextSize > math.MaxUint32 {
-			fmt.Printf("returning from QueryFullProcessName err=buffer size %d exceeds limit, after %d tries\n", nextSize, tries)
+			fmt.Printf("[GoR:%d] !returning from QueryFullProcessName err=buffer size %d exceeds limit, after %d tries\n", GoRoutineId(), nextSize, tries)
 			return "", fmt.Errorf("buffer size %d exceeds limit, after %d tries", nextSize, tries)
 		}
 
@@ -428,10 +429,10 @@ func ExePathFromPID(pid uint32) (string, error) {
 }
 
 func GetProcessName(pid uint32) (string, error) {
-	fmt.Printf("starting GetProcessName pid=%d\n", pid)
+	fmt.Printf("[GoR:%d] !starting GetProcessName pid=%d\n", GoRoutineId(), pid)
 	snapshot, err := CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		fmt.Printf("returning from GetProcessName err=%v\n", err)
+		fmt.Printf("[GoR:%d] !returning from GetProcessName err=%v\n", GoRoutineId(), err)
 		return "", err
 	}
 	defer windows.CloseHandle(snapshot)
@@ -444,23 +445,23 @@ func GetProcessName(pid uint32) (string, error) {
 	err = Process32First(snapshot, &entry)
 	for err == nil {
 		if count > maxProcessEntries {
-			fmt.Printf("returning from GetProcessName err=limit(%d)! count=%d\n", maxProcessEntries, count)
+			fmt.Printf("[GoR:%d] !returning from GetProcessName err=limit(%d)! count=%d\n", GoRoutineId(), maxProcessEntries, count)
 			return "", fmt.Errorf("Process32 enumeration exceeded safety limit")
 		}
 		count++
 		//doneTODO: make a hard limit here, so it doesn't loop infinitely just in case.
 		if entry.ProcessID == pid {
-			fmt.Printf("returning from GetProcessName all good\n")
+			fmt.Printf("[GoR:%d] !returning from GetProcessName all good\n", GoRoutineId())
 			return windows.UTF16ToString(entry.ExeFile[:]), nil
 		}
 		err = Process32Next(snapshot, &entry)
 	}
 
 	if !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
-		fmt.Printf("returning from GetProcessName err=%v\n", err)
+		fmt.Printf("[GoR:%d] !returning from GetProcessName err=%v\n", GoRoutineId(), err)
 		return "", err
 	}
-	fmt.Printf("returning from GetProcessName err=not found\n")
+	fmt.Printf("[GoR:%d] !returning from GetProcessName err=not found\n", GoRoutineId())
 	return "", fmt.Errorf("not found, err: %w", err)
 }
 
@@ -495,7 +496,7 @@ func GetProcessName(pid uint32) (string, error) {
 // If a flag isn’t used (e.g., you don’t include TH32CS_SNAPPROCESS), CreateToolhelp32Snapshot will not include that object type in the snapshot.
 // TH32CS_SNAPPROCESS specifically tells the API to include all processes in the snapshot. Without it, Process32First/Process32Next won’t enumerate any processes.
 func CreateToolhelp32Snapshot(dwFlags, th32ProcessID uint32) (windows.Handle, error) {
-	fmt.Printf("starting CreateToolhelp32Snapshot\n")
+	fmt.Printf("[GoR:%d] !starting CreateToolhelp32Snapshot\n", GoRoutineId())
 	// r1, _, err := procCreateToolhelp32Snapshot.Call( //FIXME: restore this?
 	// 	uintptr(dwFlags),
 	// 	uintptr(th32ProcessID),
@@ -503,10 +504,10 @@ func CreateToolhelp32Snapshot(dwFlags, th32ProcessID uint32) (windows.Handle, er
 	r1, err := windows.CreateToolhelp32Snapshot(dwFlags, th32ProcessID)
 	err = CheckWinResult("windows.CreateToolhelp32Snapshot", CheckHandle, 0, err)
 	if err != nil {
-		fmt.Printf("ending CreateToolhelp32Snapshot err=%v\n", err)
+		fmt.Printf("[GoR:%d] !ending CreateToolhelp32Snapshot err=%v\n", GoRoutineId(), err)
 		return 0, err
 	}
-	fmt.Printf("ending CreateToolhelp32Snapshot OK\n")
+	fmt.Printf("[GoR:%d] !ending CreateToolhelp32Snapshot OK\n", GoRoutineId())
 	//return windows.Handle(r1), nil
 	return r1, nil
 }
@@ -521,9 +522,9 @@ func CreateToolhelp32Snapshot(dwFlags, th32ProcessID uint32) (windows.Handle, er
 
 // Process32First wraps callProcess32First.
 func Process32First(snapshot windows.Handle, entry *windows.ProcessEntry32) error {
-	fmt.Printf("starting Process32First\n")
+	fmt.Printf("[GoR:%d] !starting Process32First\n", GoRoutineId())
 	if entry == nil {
-		fmt.Printf("ending Process32First err=nil entry\n")
+		fmt.Printf("[GoR:%d] !ending Process32First err=nil entry\n", GoRoutineId())
 		return errors.New("Process32First: nil entry")
 	}
 	//_, _, err := procProcess32First.Call(uintptr(snapshot), uintptr(unsafe.Pointer(entry))) //FIXME: restore this?
@@ -536,15 +537,15 @@ func Process32First(snapshot windows.Handle, entry *windows.ProcessEntry32) erro
 	// It ensures 'entry' is considered "live" by the GC
 	// until this specific line is reached.
 	runtime.KeepAlive(entry)
-	fmt.Printf("ending Process32First err=%v\n", err)
+	fmt.Printf("[GoR:%d] !ending Process32First err=%v\n", GoRoutineId(), err)
 	return err
 }
 
 // Process32Next wraps callProcess32Next.
 func Process32Next(snapshot windows.Handle, entry *windows.ProcessEntry32) error {
-	fmt.Printf("starting Process32Next\n")
+	fmt.Printf("[GoR:%d] !starting Process32Next\n", GoRoutineId())
 	if entry == nil {
-		fmt.Printf("ending Process32Next err=nil entry\n")
+		fmt.Printf("[GoR:%d] !ending Process32Next err=nil entry\n", GoRoutineId())
 		return errors.New("Process32Next: nil entry")
 	}
 	//_, _, err := procProcess32Next.Call(uintptr(snapshot), uintptr(unsafe.Pointer(entry))) //FIXME: restore this?
@@ -556,7 +557,7 @@ func Process32Next(snapshot windows.Handle, entry *windows.ProcessEntry32) error
 	// It ensures 'entry' is considered "live" by the GC
 	// until this specific line is reached.
 	runtime.KeepAlive(entry)
-	fmt.Printf("ending Process32Next err=%v\n", err)
+	fmt.Printf("[GoR:%d] !ending Process32Next err=%v\n", GoRoutineId(), err)
 	return err
 }
 
@@ -597,7 +598,7 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 	// We'll need these to persist across the closure calls
 	var servicesReturned uint32
 
-	fmt.Println("!before2(before callWithRetry in GetServiceNamesFromPIDUncached)")
+	fmt.Printf("[GoR:%d] !before2(before callWithRetry in GetServiceNamesFromPIDUncached)\n", GoRoutineId())
 	// Use our retry helper to handle the buffer growth logic
 	// We use callWithRetry because the service list is highly volatile.
 	buffer, err := callWithRetry("GetServiceNamesFromPIDUncached", 0, func(bufPtr *byte, s *uint32) error {
@@ -606,7 +607,7 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 		// Note: we usually keep resumeHandle at 0 for a fresh start on each retry
 		// unless we are specifically doing paged enumeration.
 		var currentResumeHandle uint32
-		fmt.Printf("!before5(before windows.EnumServicesStatusEx) servicesReturned=%d\n", servicesReturned)
+		fmt.Printf("[GoR:%d] !before5(before windows.EnumServicesStatusEx) servicesReturned=%d\n", GoRoutineId(), servicesReturned)
 		errEnum := windows.EnumServicesStatusEx(
 			scm,
 			windows.SC_ENUM_PROCESS_INFO,
@@ -624,10 +625,10 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 		runtime.KeepAlive(bufPtr)
 		runtime.KeepAlive(s)
 
-		fmt.Println("!after5(after windows.EnumServicesStatusEx) servicesReturned=%d", servicesReturned)
+		fmt.Printf("[GoR:%d] !after5(after windows.EnumServicesStatusEx) servicesReturned=%d\n", GoRoutineId(), servicesReturned)
 		return errEnum
 	})
-	fmt.Println("!after2(after callWithRetry in GetServiceNamesFromPIDUncached)")
+	fmt.Printf("[GoR:%d] !after2(after callWithRetry in GetServiceNamesFromPIDUncached)\n", GoRoutineId())
 
 	if err != nil {
 		return nil, fmt.Errorf("EnumServicesStatusEx failed: %w", err)
@@ -639,12 +640,12 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 
 	//this 'if' suggested by Claude Sonnet 4.6: (i DRY-ed the 'foo')
 	if foo := uint64(servicesReturned) * uint64(entrySize); foo > uint64(len(buffer)) {
-		fmt.Println("!middle3")
+		fmt.Printf("[GoR:%d] !middle3\n", GoRoutineId())
 		return nil, fmt.Errorf("servicesReturned(%d) * entrySize(%d) = %d exceeds buffer len(%d): API invariant violated",
 			servicesReturned, entrySize, foo, len(buffer))
 	}
 
-	fmt.Println("!before3(a 'for' listing servicesReturned in GetServiceNamesFromPIDUncached)")
+	fmt.Printf("[GoR:%d] !before3(a 'for' listing servicesReturned in GetServiceNamesFromPIDUncached)\n", GoRoutineId())
 	for i := uint32(0); i < servicesReturned; i++ {
 		offset := uintptr(i) * entrySize
 		if offset+entrySize > uintptr(len(buffer)) {
@@ -658,20 +659,20 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 		snPtr := uintptr(unsafe.Pointer(data.ServiceName))
 		if snPtr < bufStart || snPtr >= bufEnd {
 			//continue // pointer outside buffer — skip this entry
-			return nil, fmt.Errorf("entry %d at offset %d which has entrySize %d, in the buffer len %d, has a ServiceName ptr outside the buffer=%p area, snPtr=%p bufStart=%d bufEnd=%d",
+			return nil, fmt.Errorf("entry %d at offset %d which has entrySize %d, in the buffer len %d, has a ServiceName ptr outside the buffer=%p area, snPtr=%X bufStart=%d bufEnd=%d",
 				i, offset, entrySize, len(buffer), buffer, snPtr, bufStart, bufEnd)
 		}
 
 		if data.ServiceStatusProcess.ProcessId == targetPID {
-			fmt.Println("!before4")
+			fmt.Printf("[GoR:%d] !before4\n", GoRoutineId())
 			str := windows.UTF16PtrToString(data.ServiceName)
-			fmt.Println("!after4")
+			fmt.Printf("[GoR:%d] !after4\n", GoRoutineId())
 			// We use UTF16PtrToString because ServiceName is a *uint16
 			// pointing into the same buffer returned by the API.
 			serviceNames = append(serviceNames, str)
 		}
 	}
-	fmt.Println("!after3(end of 'for' listing servicesReturned in GetServiceNamesFromPIDUncached)")
+	fmt.Printf("[GoR:%d] !after3(end of 'for' listing servicesReturned in GetServiceNamesFromPIDUncached)\n", GoRoutineId())
 
 	runtime.KeepAlive(buffer)     // keep buffer alive until all ServiceName pointer dereferences are done, because: windows.UTF16PtrToString(data.ServiceName) dereferences an absolute pointer written by the API into the buffer.
 	runtime.KeepAlive(&buffer[0]) //just in case
@@ -847,7 +848,7 @@ func PidAndExeForTCP(clientAddr *net.TCPAddr) (uint32, string, error) {
 // serviceNameCache caches PID→service-names with a short TTL to avoid
 // hammering EnumServicesStatusEx on every packet under high concurrency.
 // This also eliminates the concurrent unsafe-buffer pressure that caused
-// the STATUS_ACCESS_VIOLATION crash under -race load.
+// the STATUS_ACCESS_VIOLATION crash under -race load. No, the cause was this: https://github.com/golang/go/issues/77975
 type serviceCacheEntry struct {
 	names     []string
 	expiresAt time.Time
@@ -884,3 +885,30 @@ func GetServiceNamesFromPIDCached(targetPID uint32) ([]string, error) {
 
 	return names, nil
 }
+
+func GoRoutineId() int64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	// "goroutine 17 [running]:\n..."
+	var id int64 = -1
+	fmt.Sscanf(string(buf[:n]), "goroutine %d", &id)
+	return id
+}
+
+// //made(wrongly) by Claude Sonnet 4.6
+// func InstallCrashSink() {
+// 	f, err := os.OpenFile("crash.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+// 	if err != nil {
+// 		return
+// 	}
+// 	// Redirect stderr — Go runtime writes its panic output there
+// 	// On Windows with CGO+race, stderr is where the runtime dumps stacks.
+// 	// We dup2 it so both console AND file get it.
+// 	if err := RedirectStderrToFile(f); err != nil {
+// 		f.Close()
+// 	}
+// }
+
+// func RedirectStderrToFile(f *os.File) error {
+// 	return windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(f.Fd()))
+// }

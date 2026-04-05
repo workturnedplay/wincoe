@@ -91,7 +91,7 @@ func SetConsoleTextAttribute(h windows.Handle, color uint16) error {
 	// Execute the syscall
 	// //works:
 	r1, _, callErr := procSetConsoleTextAttribute.Call(uintptr(h), uintptr(color))
-	err := CheckWinResult("LazyProc.Call for SetConsoleTextAttribute", CheckBool, r1, callErr)
+	err := CheckWinResult("SetConsoleTextAttribute via LazyProc.Call", CheckBool, r1, callErr)
 
 	// //works:
 	// _, _, err := wincall.WinCall(procSetConsoleTextAttribute, wincall.CheckBool, uintptr(h), uintptr(color))
