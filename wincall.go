@@ -76,10 +76,10 @@ func CheckWinResult(
 	r1 uintptr,
 	callErr error,
 ) error {
-	fmt.Printf("[GoR:%d] !starting CheckWinResult for %s\n", GoRoutineId(), operationNameToIncludeInErrorMessages)
-	Smashy(true)
+	//fmt.Printf("[GoR:%d] !starting CheckWinResult for %s\n", GoRoutineId(), operationNameToIncludeInErrorMessages)
+	//Smashy(true)
 	if !isFailure(r1) {
-		fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with SUCCESS.\n", GoRoutineId(), operationNameToIncludeInErrorMessages)
+		//fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with SUCCESS.\n", GoRoutineId(), operationNameToIncludeInErrorMessages)
 		// Success: return nil so 'if err != nil' behaves normally.
 		return nil
 	}
@@ -98,13 +98,13 @@ func CheckWinResult(
 
 			// Defensive: avoid ever wrapping ERROR_SUCCESS
 			if !errors.Is(errno, windows.ERROR_SUCCESS) {
-				fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with Errno: %v\n", GoRoutineId(), operationNameToIncludeInErrorMessages, errno)
+				//fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with Errno: %v\n", GoRoutineId(), operationNameToIncludeInErrorMessages, errno)
 				// since r1 != 0 already, this is bound to never be ERROR_SUCCESS here, unless r1 != 0 can ever be ERROR_SUCCESS, unsure.
 				return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, errno)
 			}
 		}
 
-		fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with truly unknown failure: ret=%d\n", GoRoutineId(), operationNameToIncludeInErrorMessages, r1)
+		//fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with truly unknown failure: ret=%d\n", GoRoutineId(), operationNameToIncludeInErrorMessages, r1)
 		// Fallback: truly unknown failure
 		return fmt.Errorf(
 			"%q windows call reported failure (ret=%d) but no usable error was provided",
@@ -113,7 +113,7 @@ func CheckWinResult(
 		)
 	}
 
-	fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with normal callErr: %v\n", GoRoutineId(), operationNameToIncludeInErrorMessages, callErr)
+	//fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with normal callErr: %v\n", GoRoutineId(), operationNameToIncludeInErrorMessages, callErr)
 	// Normal path: we have a meaningful callErr
 	return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, callErr)
 
@@ -501,14 +501,14 @@ func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) (uintptr, ui
 	if op == "" {
 		op = UnspecifiedWinApi
 	}
-	fmt.Printf("[GoR:%d] !starting WinCall: %s\n", GoRoutineId(), op)
-	Smashy(true)
+	//fmt.Printf("[GoR:%d] !starting WinCall: %s\n", GoRoutineId(), op)
+	//Smashy(true)
 	// args is a []uintptr, but because of //go:uintptrescapes, the caller
 	// has already pinned the memory safely before we get here.
 	r1, r2, callErr := proc.Call(args...)
-	fmt.Printf("[GoR:%d] !checking WinCall: %s\n", GoRoutineId(), op)
+	//fmt.Printf("[GoR:%d] !checking WinCall: %s\n", GoRoutineId(), op)
 	err := CheckWinResult(op, check, r1, callErr)
-	fmt.Printf("[GoR:%d] !ending   WinCall: %s\n", GoRoutineId(), op)
+	//fmt.Printf("[GoR:%d] !ending   WinCall: %s\n", GoRoutineId(), op)
 	return r1, r2, err
 }
 
