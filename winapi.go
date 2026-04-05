@@ -203,8 +203,8 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 			if uint64(size) > uint64(len(buf)) {
 				panic("impossible: size is bigger than len(buf)")
 			}
-			//return buf, nil // epic fail here
-			return buf[:size], nil // fixed one issue!
+			return buf, nil // epic fail here if returning buf[:size] because size is 0 even tho servicesReturned is > 0
+			//return buf[:size], nil // fixed one issue! nope! because: The size parameter is only reliable when the API returns ERROR_MORE_DATA or ERROR_INSUFFICIENT_BUFFER. On success it is frequently set to 0, even when the buffer contains real data.
 		}
 
 		// Windows uses both INSUFFICIENT_BUFFER and MORE_DATA
@@ -598,7 +598,7 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 	// We'll need these to persist across the closure calls
 	var servicesReturned uint32
 
-	// fmt.Printf("[GoR:%d] !before2(before callWithRetry in GetServiceNamesFromPIDUncached)\n", GoRoutineId())
+	//fmt.Printf("[GoR:%d] !before2(before callWithRetry in GetServiceNamesFromPIDUncached)\n", GoRoutineId())
 	// Use our retry helper to handle the buffer growth logic
 	// We use callWithRetry because the service list is highly volatile.
 	buffer, err := callWithRetry("GetServiceNamesFromPIDUncached", 0, func(bufPtr *byte, s *uint32) error {
@@ -633,17 +633,25 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("EnumServicesStatusEx failed: %w", err)
 	}
+	if buffer == nil {
+		return nil, fmt.Errorf("nil buffer from callWithRetry, no error though")
+	}
+	if len(buffer) == 0 {
+		return nil, fmt.Errorf("non-nil buffer with 0 length, from callWithRetry, no error though")
+	}
 
 	// Parsing logic remains the same, but now it's protected by the retry logic
 	var serviceNames []string
 	entrySize := unsafe.Sizeof(windows.ENUM_SERVICE_STATUS_PROCESS{})
 
 	//this 'if' suggested by Claude Sonnet 4.6: (i DRY-ed the 'foo')
-	if foo := uint64(servicesReturned) * uint64(entrySize); foo > uint64(len(buffer)) {
+	if partialLen := uint64(servicesReturned) * uint64(entrySize); partialLen > uint64(len(buffer)) { // unlikely to ever be hit!
 		// fmt.Printf("[GoR:%d] !middle3\n", GoRoutineId())
 		return nil, fmt.Errorf("servicesReturned(%d) * entrySize(%d) = %d exceeds buffer len(%d): API invariant violated",
-			servicesReturned, entrySize, foo, len(buffer))
+			servicesReturned, entrySize, partialLen, len(buffer))
 	}
+	// Trim the buffer to the actual data written, bad Grok 4.20! because data.ServiceName is a pointer past this size, still in the buffer tho!
+	//buffer = buffer[:realLen] // safe slice header adjustment, no reallocation
 
 	// fmt.Printf("[GoR:%d] !before3(a 'for' listing servicesReturned in GetServiceNamesFromPIDUncached)\n", GoRoutineId())
 	for i := uint32(0); i < servicesReturned; i++ {
@@ -653,14 +661,18 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 				i, offset, entrySize, len(buffer))
 		}
 		data := (*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buffer[offset]))
+		runtime.GC() //Grok says this will crash because of 'data' being a pointer into buffer
+
 		// Validate ServiceName pointer is within buffer before dereferencing
 		bufStart := uintptr(unsafe.Pointer(&buffer[0]))
 		bufEnd := bufStart + uintptr(len(buffer))
 		snPtr := uintptr(unsafe.Pointer(data.ServiceName))
 		if snPtr < bufStart || snPtr >= bufEnd {
 			//continue // pointer outside buffer — skip this entry
-			return nil, fmt.Errorf("entry %d at offset %d which has entrySize %d, in the buffer len %d, has a ServiceName ptr outside the buffer=%p area, snPtr=%X bufStart=%d bufEnd=%d",
-				i, offset, entrySize, len(buffer), buffer, snPtr, bufStart, bufEnd)
+			return nil, fmt.Errorf("entry %d at offset %0x which has entrySize %d, in the buffer len %d, "+
+				"has a ServiceName ptr outside the buffer=%p area, snPtr=%0x bufStart=%0x bufEnd=%0x",
+				i, offset, entrySize, len(buffer),
+				buffer, snPtr, bufStart, bufEnd)
 		}
 
 		if data.ServiceStatusProcess.ProcessId == targetPID {
