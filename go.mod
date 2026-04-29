@@ -1,6 +1,6 @@
 module github.com/workturnedplay/wincoe
 
-go 1.27
+go 1.26.2
 
 require (
 	golang.org/x/sys v0.43.0
