@@ -484,14 +484,21 @@ func CheckWinResult(
 	if callErr == nil {
 		// Many Win32 APIs (e.g. GetExtendedUdpTable) return the error in r1.
 		// Only treat r1 as an errno if it's non-zero.
-		if r1 != 0 {
-			errno := windows.Errno(r1) //TODO: see how we can match against this, I doubt errors.Is still works for this! actually, it seems to based on the below!
+		if r1 != 0 { // 0 here is exactly windows.ERROR_SUCCESS
+			errno := windows.Errno(r1) //doneTODO: see how we can match against this, I doubt errors.Is still works for this! actually, it seems to, based on the below!
 
-			// Defensive: avoid ever wrapping ERROR_SUCCESS
-			if !errors.Is(errno, windows.ERROR_SUCCESS) {
-				// since r1 != 0 already, this is bound to never be ERROR_SUCCESS here, unless r1 != 0 can ever be ERROR_SUCCESS, unsure.
-				return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, errno)
-			}
+			// Local compile-time assertion trap(to avoid that inner 'if'):
+			type _ [0 - int(windows.ERROR_SUCCESS)]byte
+
+			// Compile-time assertion that ERROR_SUCCESS is 0.
+			// If it is NOT 0, this evaluates to [-1]int, which causes a compiler error.
+			var _ [0 - int(windows.ERROR_SUCCESS)]int
+
+			//// Defensive: avoid ever wrapping ERROR_SUCCESS
+			//if !errors.Is(errno, windows.ERROR_SUCCESS) {
+			// since r1 != 0 already, this is bound to never be ERROR_SUCCESS here, unless r1 != 0 can ever be ERROR_SUCCESS, unsure.
+			return fmt.Errorf("%q windows call failed with error: %w", operationNameToIncludeInErrorMessages, errno)
+			//}
 		}
 
 		//fmt.Printf("[GoR:%d] !ending   CheckWinResult for %s with truly unknown failure: ret=%d\n", GoRoutineId(), operationNameToIncludeInErrorMessages, r1)
