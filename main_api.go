@@ -1038,7 +1038,7 @@ func GetProcessName(pid uint32) (string, error) {
 	err = Process32First(snapshot, &entry)
 	for err == nil {
 		if count > maxProcessEntries {
-			return "", fmt.Errorf("Process32 enumeration exceeded safety limit")
+			return "", fmt.Errorf("Process32 enumeration exceeded safety limit of %d active processes currently running", maxProcessEntries)
 		}
 		count++
 		//doneTODO: make a hard limit here, so it doesn't loop infinitely just in case.
