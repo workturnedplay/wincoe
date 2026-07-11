@@ -987,8 +987,6 @@ func GetBugLogger() *slog.Logger {
 	def := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
-	//wincoe.Logger = def //give wincoe lib a logger too
-	Logger.Store(def) //give wincoe lib a logger too
 	return def
 }
 
