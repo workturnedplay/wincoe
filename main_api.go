@@ -955,15 +955,7 @@ func impossibiru(msg string) {
 	panic2(msg2)
 }
 func panic2(msg string) {
-	//Logger.Error(msg)
-	if l := Logger.Load(); l != nil {
-		l.Error(msg)
-	} else {
-		//def := slog.Default()
-		def := GetBugLogger()
-		def.Warn("BUG: Using slog.Default() for the next log line due to Logger.Load()==nil in wincoe, this means dev. didn't init Logger somehow!")
-		def.Error(msg)
-	}
+	GetBugLogger().Error(msg)
 	panic(msg)
 }
 
