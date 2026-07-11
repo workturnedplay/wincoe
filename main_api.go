@@ -959,11 +959,37 @@ func panic2(msg string) {
 	if l := Logger.Load(); l != nil {
 		l.Error(msg)
 	} else {
-		def := slog.Default()
+		//def := slog.Default()
+		def := GetBugLogger()
 		def.Warn("BUG: Using slog.Default() for the next log line due to Logger.Load()==nil in wincoe, this means dev. didn't init Logger somehow!")
 		def.Error(msg)
 	}
 	panic(msg)
+}
+
+// bugLogger is a package-level fallback logger used only by free functions
+// (not methods on Server/AdminUI) that need to log a BUG-class invariant
+// violation immediately before panicking, but have no logger threaded to them.
+// Kept in sync with the active logger via applyLogger. Falls back to
+// slog.Default() before logging is initialized (mirrors Server.getLogger()'s
+// own fallback behavior).
+var bugLogger atomic.Pointer[slog.Logger]
+
+func SetBugLogger(newLogger *slog.Logger) {
+	bugLogger.Store(newLogger)
+}
+
+func GetBugLogger() *slog.Logger {
+	if l := bugLogger.Load(); l != nil {
+		return l
+	}
+	//def := slog.Default()
+	def := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	//wincoe.Logger = def //give wincoe lib a logger too
+	Logger.Store(def) //give wincoe lib a logger too
+	return def
 }
 
 // exePathFromPID returns process image path for pid or an error.
@@ -1514,7 +1540,8 @@ func (fw *GenericSafeFileWriter) getLogger() *slog.Logger {
 	if l := fw.liveLogger.Load(); l != nil {
 		return l
 	}
-	log := slog.Default()
+	//log := slog.Default()
+	log := GetBugLogger()
 	log.Error("BUG: safeFileWriter.liveLogger wasn't inited, using default.")
 	return log
 }
@@ -1861,7 +1888,8 @@ func (fw *win11SafeFileWriter) getLogger() *slog.Logger {
 	if l := fw.liveLogger.Load(); l != nil {
 		return l
 	}
-	log := slog.Default()
+	//log := slog.Default()
+	log := GetBugLogger()
 	log.Error("BUG: win11SafeFileWriter.liveLogger wasn't inited, using default.")
 	return log
 }
