@@ -278,7 +278,8 @@ type mockLazyProc struct {
 	name     string  // what .Name() returns
 	nextR1   uintptr // next value returned by .Call()
 	nextR2   uintptr
-	nextErr  error     // next lastErr from .Call()
+	nextErr  error // next lastErr from .Call()
+	findErr  error
 	callArgs []uintptr // optional: record arguments for assertions
 }
 
@@ -291,4 +292,9 @@ func (m *mockLazyProc) Name() string {
 func (m *mockLazyProc) Call(a ...uintptr) (r1, r2 uintptr, lastErr error) {
 	m.callArgs = a // record for possible assertions
 	return m.nextR1, m.nextR2, m.nextErr
+}
+
+// Find implements LazyProcish for testing
+func (m *mockLazyProc) Find() error {
+	return m.findErr
 }
