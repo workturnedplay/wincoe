@@ -19,7 +19,10 @@ package wincoe
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -437,4 +440,262 @@ func (m *mockLazyProc) Call(a ...uintptr) (r1, r2 uintptr, lastErr error) {
 // Find implements LazyProcish for testing
 func (m *mockLazyProc) Find() error {
 	return m.findErr
+}
+
+func TestWinResult_Methods(t *testing.T) {
+	t.Parallel()
+
+	wrapped := fmt.Errorf("wrapped: %w", windows.ERROR_ACCESS_DENIED)
+
+	tests := []struct {
+		name          string
+		res           WinResult
+		wantFailed    bool
+		wantSucceeded bool
+
+		errTarget error
+		wantErrIs bool
+
+		callStatusTarget error
+		wantCallStatusIs bool
+	}{
+		{
+			name:          "success",
+			res:           WinResult{},
+			wantSucceeded: true,
+		},
+		{
+			name: "wrapped Err",
+			res: WinResult{
+				Err: wrapped,
+			},
+			wantFailed: true,
+			errTarget:  windows.ERROR_ACCESS_DENIED,
+			wantErrIs:  true,
+		},
+		{
+			name: "wrapped CallStatus",
+			res: WinResult{
+				CallStatus: fmt.Errorf("wrapped: %w", windows.ERROR_ALREADY_EXISTS),
+			},
+			wantSucceeded:    true,
+			callStatusTarget: windows.ERROR_ALREADY_EXISTS,
+			wantCallStatusIs: true,
+		},
+		{
+			name: "ErrIs negative",
+			res: WinResult{
+				Err: fmt.Errorf("wrapped: %w", windows.ERROR_ACCESS_DENIED),
+			},
+			wantFailed:    true,
+			wantSucceeded: false,
+			errTarget:     windows.ERROR_INVALID_HANDLE,
+			wantErrIs:     false,
+		},
+		{
+			name: "CallStatusIs negative",
+			res: WinResult{
+				CallStatus: fmt.Errorf("wrapped: %w", windows.ERROR_ALREADY_EXISTS),
+			},
+			wantFailed:       false,
+			wantSucceeded:    true,
+			callStatusTarget: windows.ERROR_ACCESS_DENIED,
+			wantCallStatusIs: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.res.Failed(); got != tt.wantFailed {
+				t.Fatalf("Failed()=%v want %v", got, tt.wantFailed)
+			}
+
+			if got := tt.res.Succeeded(); got != tt.wantSucceeded {
+				t.Fatalf("Succeeded()=%v want %v", got, tt.wantSucceeded)
+			}
+
+			if tt.errTarget != nil {
+				if got := tt.res.ErrIs(tt.errTarget); got != tt.wantErrIs {
+					t.Fatalf("ErrIs()=%v want %v", got, tt.wantErrIs)
+				}
+			}
+
+			if tt.callStatusTarget != nil {
+				if got := tt.res.CallStatusIs(tt.callStatusTarget); got != tt.wantCallStatusIs {
+					t.Fatalf("CallStatusIs()=%v want %v", got, tt.wantCallStatusIs)
+				}
+			}
+		})
+	}
+}
+
+func assertPanics(t *testing.T, fn func()) {
+	t.Helper()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+
+	fn()
+}
+
+func TestRealProc2_NilDLLPanics(t *testing.T) {
+	assertPanics(t, func() {
+		RealProc2(nil, "MessageBoxW")
+	})
+}
+
+func TestWinCall_NilProcPanics(t *testing.T) {
+	assertPanics(t, func() {
+		WinCall(nil, CheckBool)
+	})
+}
+
+func TestBoolToUintptr(t *testing.T) {
+	tests := []struct {
+		in   bool
+		want uintptr
+	}{
+		{false, 0},
+		{true, 1},
+	}
+
+	for _, tt := range tests {
+		if got := boolToUintptr(tt.in); got != tt.want {
+			t.Fatalf("boolToUintptr(%v)=%d want %d", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestRealProc2_EmptyNamePanics(t *testing.T) {
+	dll := windows.NewLazySystemDLL("kernel32.dll")
+
+	for _, name := range []string{"", " ", "\t", "\n"} {
+		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
+			assertPanics(t, func() {
+				RealProc2(dll, name)
+			})
+		})
+	}
+}
+
+func TestNewBoundProc_NilCheckFuncPanics(t *testing.T) {
+	dll := windows.NewLazySystemDLL("kernel32.dll")
+
+	assertPanics(t, func() {
+		NewBoundProc(dll, "GetCurrentProcessId", nil)
+	})
+}
+
+func TestCallWithRetry_Success(t *testing.T) {
+	calls := 0
+
+	buf, err := callWithRetry("test", 0,
+		func(_ *byte, _ *uint32) error {
+			calls++
+			return nil
+		},
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if buf != nil {
+		t.Fatalf("expected nil buffer, got len=%d", len(buf))
+	}
+
+	if calls != 1 {
+		t.Fatalf("calls=%d want 1", calls)
+	}
+}
+
+func TestCallWithRetry_RetryThenSuccess(t *testing.T) {
+	calls := 0
+
+	buf, err := callWithRetry("test", 0,
+		func(_ *byte, size *uint32) error {
+			calls++
+
+			switch calls {
+			case 1:
+				*size = 64
+				return windows.ERROR_MORE_DATA
+
+			case 2:
+				*size = 128
+				return windows.ERROR_MORE_DATA
+
+			default:
+				return nil
+			}
+		},
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(buf) != 128 {
+		t.Fatalf("len(buf)=%d want 128", len(buf))
+	}
+
+	if calls != 3 {
+		t.Fatalf("calls=%d want 3", calls)
+	}
+}
+
+func TestCallWithRetry_GenericErrorStopsImmediately(t *testing.T) {
+	calls := 0
+
+	_, err := callWithRetry("test", 0,
+		func(_ *byte, _ *uint32) error {
+			calls++
+			return windows.ERROR_ACCESS_DENIED
+		},
+	)
+
+	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf("calls=%d want 1", calls)
+	}
+}
+
+func TestCallWithRetry_MaxRetries(t *testing.T) {
+	calls := 0
+
+	_, err := callWithRetry("test", 0,
+		func(_ *byte, size *uint32) error {
+			calls++
+			*size += 64
+			return windows.ERROR_INSUFFICIENT_BUFFER
+		},
+	)
+
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if !strings.Contains(err.Error(), "max retries") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if calls != 10 {
+		t.Fatalf("calls=%d want 10", calls)
+	}
+}
+
+func TestGetLoggerOrFallback_UninitializedAtomic(t *testing.T) {
+	var ptr atomic.Pointer[slog.Logger]
+
+	got := GetLoggerOrFallback(&ptr, "test")
+
+	if got == nil {
+		t.Fatal("returned nil logger")
+	}
 }
