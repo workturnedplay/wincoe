@@ -553,6 +553,16 @@ var (
 	CheckGDIError WinCheckFunc = func(r1 uintptr, _ error) bool {
 		return uint32(r1) == GDIError // aka 0xffffffff
 	}
+
+	// CheckStringLength returns true (failure) only if r1 is 0 AND an actual error is set.
+	CheckStringLength WinCheckFunc = func(r1 uintptr, callErr error) bool {
+		if r1 == 0 {
+			if callErr != nil && !errors.Is(callErr, windows.ERROR_SUCCESS) {
+				return true // It's a real failure
+			}
+		}
+		return false // It's just an empty string
+	}
 )
 
 const CLR_INVALID uint32 = 0xffffffff
