@@ -144,6 +144,136 @@ var tests = []struct {
 		wantErr:       true,
 		expectNoIsErr: windows.ERROR_SUCCESS,
 	},
+	// --- CheckAdjustTokenPrivileges ---
+	{
+		name:      "AdjustTokenPrivileges Failure (r1=0)",
+		isFailure: CheckAdjustTokenPrivileges,
+		r1:        0,
+		callErr:   windows.ERROR_ACCESS_DENIED,
+		wantErr:   true,
+	},
+	{
+		name:        "AdjustTokenPrivileges Partial Failure (ERROR_NOT_ALL_ASSIGNED)",
+		isFailure:   CheckAdjustTokenPrivileges,
+		r1:          1, // API returns TRUE
+		callErr:     windows.ERROR_NOT_ALL_ASSIGNED,
+		wantErr:     true,
+		expectIsErr: windows.ERROR_NOT_ALL_ASSIGNED,
+	},
+	{
+		name:      "AdjustTokenPrivileges Success",
+		isFailure: CheckAdjustTokenPrivileges,
+		r1:        1,
+		callErr:   windows.ERROR_SUCCESS,
+		wantErr:   false,
+	},
+
+	// --- CheckZero ---
+	{
+		name:      "CheckZero Failure (r1=0)",
+		isFailure: CheckZero,
+		r1:        0,
+		wantErr:   true,
+	},
+	{
+		name:      "CheckZero Success (r1=1)",
+		isFailure: CheckZero,
+		r1:        1,
+		wantErr:   false,
+	},
+
+	// --- CheckMinusOne ---
+	{
+		name:      "CheckMinusOne Failure (r1=-1)",
+		isFailure: CheckMinusOne,
+		r1:        ^uintptr(0),
+		wantErr:   true,
+	},
+	{
+		name:      "CheckMinusOne Success (r1=0)",
+		isFailure: CheckMinusOne,
+		r1:        0,
+		wantErr:   false,
+	},
+
+	// --- CheckNone ---
+	{
+		name:      "CheckNone Success (r1=0)",
+		isFailure: CheckNone,
+		r1:        0,
+		wantErr:   false, // Always succeeds
+	},
+	{
+		name:      "CheckNone Success (r1=-1)",
+		isFailure: CheckNone,
+		r1:        ^uintptr(0),
+		wantErr:   false, // Always succeeds
+	},
+
+	// --- CheckNTSTATUS ---
+	{
+		name:      "CheckNTSTATUS Failure (STATUS_ACCESS_DENIED)",
+		isFailure: CheckNTSTATUS,
+		r1:        uintptr(0xC0000022), // High bit set, evaluates to negative int32
+		wantErr:   true,
+	},
+	{
+		name:      "CheckNTSTATUS Success (STATUS_SUCCESS)",
+		isFailure: CheckNTSTATUS,
+		r1:        0x00000000,
+		wantErr:   false,
+	},
+
+	// --- CheckThreadPriority ---
+	{
+		name:      "CheckThreadPriority Failure (THREAD_PRIORITY_ERROR_RETURN)",
+		isFailure: CheckThreadPriority,
+		r1:        uintptr(THREAD_PRIORITY_ERROR_RETURN),
+		wantErr:   true,
+	},
+	{
+		name:      "CheckThreadPriority Success",
+		isFailure: CheckThreadPriority,
+		r1:        0,
+		wantErr:   false,
+	},
+
+	// --- CheckCLRInvalid & CheckGDIError ---
+	{
+		name:      "CheckCLRInvalid Failure",
+		isFailure: CheckCLRInvalid,
+		r1:        uintptr(CLR_INVALID), // 0xffffffff
+		wantErr:   true,
+	},
+	{
+		name:      "CheckGDIError Failure",
+		isFailure: CheckGDIError,
+		r1:        uintptr(GDIError), // 0xffffffff
+		wantErr:   true,
+	},
+
+	// --- CheckStringLength ---
+	{
+		name:      "CheckStringLength Failure (r1=0 with real error)",
+		isFailure: CheckStringLength,
+		r1:        0,
+		callErr:   windows.ERROR_ACCESS_DENIED,
+		wantErr:   true,
+	},
+	{
+		name:      "CheckStringLength Success (Empty string, no error)",
+		isFailure: CheckStringLength,
+		r1:        0,
+		callErr:   windows.ERROR_SUCCESS,
+		wantErr:   false,
+	},
+	{
+		name:      "CheckStringLength Success (Normal string)",
+		isFailure: CheckStringLength,
+		r1:        5,
+		callErr:   nil,
+		wantErr:   false,
+	},
 }
 
 func TestCheckWinResult(t *testing.T) {
