@@ -203,16 +203,16 @@ func TestWinCall(t *testing.T) {
 				nextErr: tt.callErr,
 			}
 
-			r1, _, err := WinCall(mock, tt.isFailure)
-			if r1 != tt.r1 {
-				t.Errorf("Mock wincall was badly coded, r1=%d vs expected tt.r1=%d", r1, tt.r1)
+			res1 := WinCall(mock, tt.isFailure)
+			if res1.R1 != tt.r1 {
+				t.Errorf("Mock wincall was badly coded, r1=%d vs expected tt.r1=%d", res1.R1, tt.r1)
 			}
 
-			failed := err != nil
+			failed := res1.Failed() //err != nil
 
 			// 1. Check if we wanted an error at all
 			if (failed) != tt.wantErr {
-				t.Errorf("WinCall() returned err = %v (failed=%v), wantErr %v", err, failed, tt.wantErr)
+				t.Errorf("WinCall() returned err = %v (failed=%v), wantErr %v", res1.Err, failed, tt.wantErr)
 			}
 
 			// 3. Check for positive matches (errors.Is)
@@ -220,7 +220,10 @@ func TestWinCall(t *testing.T) {
 				if !tt.wantErr {
 					t.Errorf("Bad coding: In the tests table, tt.wantErr should be true if tt.expectIsErr is set!")
 				}
-				if !errors.Is(err, tt.expectIsErr) {
+				if !errors.Is(res1.Err, tt.expectIsErr) {
+					t.Errorf("expected errors.Is(err, %v) to be true, got false", tt.expectIsErr)
+				}
+				if !res1.ErrIs(tt.expectIsErr) {
 					t.Errorf("expected errors.Is(err, %v) to be true, got false", tt.expectIsErr)
 				}
 			}
@@ -230,7 +233,10 @@ func TestWinCall(t *testing.T) {
 				if !tt.wantErr {
 					t.Errorf("Bad coding: In the tests table, tt.wantErr should be true if tt.expectNoIsErr is set!")
 				}
-				if errors.Is(err, tt.expectNoIsErr) {
+				if errors.Is(res1.Err, tt.expectNoIsErr) {
+					t.Errorf("Footgun detected: error is incorrectly 'Is' compatible with %v , in other words: unexpected: errors.Is(err, %v) == true", tt.expectNoIsErr, tt.expectNoIsErr)
+				}
+				if res1.ErrIs(tt.expectNoIsErr) {
 					t.Errorf("Footgun detected: error is incorrectly 'Is' compatible with %v , in other words: unexpected: errors.Is(err, %v) == true", tt.expectNoIsErr, tt.expectNoIsErr)
 				}
 			}
@@ -254,12 +260,16 @@ func TestWinCall(t *testing.T) {
 					nextErr: windows.ERROR_ACCESS_DENIED,
 				}
 
-				_, _, err := WinCall(mock, CheckBool)
-				if err == nil {
+				res2 := WinCall(mock, CheckBool)
+				//if err == nil {
+				if res2.Succeeded() {
+					t.Fatal("expected error, got nil")
+				}
+				if !res2.Failed() {
 					t.Fatal("expected error, got nil")
 				}
 
-				msg := err.Error()
+				msg := res2.Err.Error()
 
 				// because you're using %q
 				expectedPrefix := `"` + UnspecifiedWinApi + `"`
