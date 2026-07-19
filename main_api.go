@@ -1954,8 +1954,8 @@ func (fw *GenericSafeFileWriter) CheckPowerLossFile(filename string) {
 		tmpName, fi.Size(), filename,
 		PowerlossFileExtension, PowerlossFileExtension,
 	)
-	log.Error(logmsg)
-	panic(logmsg) //FIXME: ? the errors/args are embedded in the msg
+	log.Error(logmsg) //FIXME: ? the errors/args are embedded in the msg
+	panic(logmsg)
 }
 
 // SafeWriteFile attempts a crash-safe file update without using os.Rename,
