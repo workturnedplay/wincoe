@@ -699,3 +699,60 @@ func TestGetLoggerOrFallback_UninitializedAtomic(t *testing.T) {
 		t.Fatal("returned nil logger")
 	}
 }
+
+func TestCheckEquals(t *testing.T) {
+	const (
+		// Pseudo-handles mimicking the ones in main.go
+		CURRENT_PROCESS_PSEUDO_HANDLE = ^uintptr(0)
+		CURRENT_THREAD_PSEUDO_HANDLE  = ^uintptr(1)
+	)
+
+	checkProcess := CheckEquals(CURRENT_PROCESS_PSEUDO_HANDLE)
+	checkThread := CheckEquals(CURRENT_THREAD_PSEUDO_HANDLE)
+
+	tests := []struct {
+		name      string
+		isFailure WinCheckFunc
+		r1        uintptr
+		callErr   error
+		wantErr   bool
+	}{
+		{
+			name:      "CheckEquals Success (Process Pseudo-Handle)",
+			isFailure: checkProcess,
+			r1:        CURRENT_PROCESS_PSEUDO_HANDLE,
+			wantErr:   false,
+		},
+		{
+			name:      "CheckEquals Failure (Process - Got 0)",
+			isFailure: checkProcess,
+			r1:        0,
+			wantErr:   true,
+		},
+		{
+			name:      "CheckEquals Success (Thread Pseudo-Handle)",
+			isFailure: checkThread,
+			r1:        CURRENT_THREAD_PSEUDO_HANDLE,
+			wantErr:   false,
+		},
+		{
+			name:      "CheckEquals Failure (Thread - Got Process Handle)",
+			isFailure: checkThread,
+			r1:        CURRENT_PROCESS_PSEUDO_HANDLE,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Leverage the existing CheckWinResult flow to ensure it behaves exactly
+			// like it would in production through the WinCall engine.
+			err := CheckWinResult(tt.name, tt.isFailure, tt.r1, tt.callErr)
+			failed := err != nil
+
+			if failed != tt.wantErr {
+				t.Errorf("CheckWinResult() with CheckEquals error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
