@@ -964,7 +964,7 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 
 		if err == nil {
 			if uint64(size) > uint64(len(buf)) {
-				impossibiru("size is bigger than len(buf)")
+				impossibiru(who + ":callWithRetry: size is bigger than len(buf)")
 			}
 			return buf, nil // epic fail here if returning buf[:size] because size is 0 even tho servicesReturned is > 0
 			//return buf[:size], nil // fixed one issue! nope this "fix" was wrong because: The size parameter is only reliable when the API returns ERROR_MORE_DATA or ERROR_INSUFFICIENT_BUFFER. On success it is frequently set to 0, even when the buffer contains real data.
@@ -976,7 +976,7 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 		//EnumServicesStatusEx (and many Enumeration APIs) returns ERROR_MORE_DATA.
 		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) &&
 			!errors.Is(err, windows.ERROR_MORE_DATA) {
-			return nil, err
+			return nil, err //TODO: shouldn't we wrap this err here? surely caller is using errors.Is on it no?! and if we don't wrap it, it's not clear it passed thru callWithRetry itself!
 		}
 		// Loop continues, using the updated 'size' from the failed call
 		//however:
@@ -989,12 +989,12 @@ func callWithRetry(who string, initialSize uint32, call func(bufPtr *byte, s *ui
 			const increment = 1024
 			const MaxInt = math.MaxUint32
 			if MaxInt-size < increment {
-				return nil, fmt.Errorf("buffer size(%d) would overflow uint32(%d) if adding %d", size, MaxInt, increment)
+				return nil, fmt.Errorf("%s:callWithRetry: buffer size(%d) would overflow uint32(%d) if adding %d", who, size, MaxInt, increment)
 			}
 			size += increment
 		}
 	}
-	return nil, fmt.Errorf("buffer growth exceeded max retries(%d)", MAX_RETRIES)
+	return nil, fmt.Errorf("%s:callWithRetry: buffer growth exceeded max retries(%d)", who, MAX_RETRIES)
 }
 
 // boolToUintptr converts a Go bool to a uintptr (1 for true, 0 for false)
