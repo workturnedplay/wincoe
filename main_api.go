@@ -1438,13 +1438,37 @@ func GetServiceNamesFromPIDUncached(targetPID uint32) ([]string, error) {
 		}
 
 		if data.ServiceStatusProcess.ProcessId == targetPID {
-			str := windows.UTF16PtrToString(data.ServiceName)
-			// We use UTF16PtrToString because ServiceName is a *uint16
-			// pointing into the same buffer returned by the API.
+			// Bounded decode instead of windows.UTF16PtrToString: the check
+			// above only confirms the string's START address lies within the
+			// buffer, not that a null terminator is guaranteed to appear
+			// before bufEnd. A corrupted/malformed SCM response could
+			// otherwise send UTF16PtrToString scanning past the end of this
+			// allocation into unmapped memory.
+			str, ok := utf16StringWithinBounds(snPtr, bufEnd)
+			if !ok {
+				return nil, fmt.Errorf("entry %d: ServiceName string has no null terminator before bufEnd (snPtr=%0x bufEnd=%0x)", i, snPtr, bufEnd)
+			}
 			serviceNames = append(serviceNames, str)
 		}
 	}
 	return serviceNames, nil
+}
+
+// utf16StringWithinBounds decodes a null-terminated UTF-16 string starting
+// at startAddr, refusing to read past endAddr. Used instead of
+// windows.UTF16PtrToString when the caller only knows the string's start
+// address lies within a fixed-size buffer, not that a null terminator is
+// guaranteed to appear before the buffer's end.
+func utf16StringWithinBounds(startAddr, endAddr uintptr) (string, bool) {
+	var units []uint16
+	for addr := startAddr; addr+1 < endAddr; addr += 2 {
+		u := *(*uint16)(unsafe.Pointer(addr)) //nolint:gosec // bounds-checked by the loop condition above
+		if u == 0 {
+			return windows.UTF16ToString(units), true
+		}
+		units = append(units, u)
+	}
+	return "", false // no null terminator found before endAddr
 }
 
 // PidAndExeForUDP returns (pid, exePath_or_exeName, error).
@@ -1474,7 +1498,6 @@ func PidAndExeForUDP(clientAddr *net.UDPAddr) (uint32, string, error) {
 
 	if buf == nil {
 		return 0, "", errors.New("GetExtendedUdpTable returned empty buffer which means there were no UDP entries in the table")
-
 	}
 
 	// Buffer layout: DWORD dwNumEntries; then array of MIB_UDPROW_OWNER_PID entries.
@@ -1586,7 +1609,6 @@ func PidAndExeForTCP(clientAddr *net.TCPAddr) (uint32, string, error) {
 	}
 	if buf == nil {
 		return 0, "", errors.New("GetExtendedTcpTable returned empty buffer")
-
 	}
 
 	if len(buf) < 4 {
@@ -2379,7 +2401,7 @@ func closeHandleLogged(h windows.Handle, context string) {
 // to ensure disk space and data integrity before touching the main file.
 func writeStagingFileWithRetry(tmpName string, data []byte, perm os.FileMode, maxAttempts int, backoff time.Duration) error {
 	return RetryFileOp(maxAttempts, backoff, func() error {
-		tmpFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+		tmpFile, err := openStagingFileSafely(tmpName, perm)
 		if err != nil {
 			return fmt.Errorf("create failed: %w", err)
 		}
@@ -2388,10 +2410,105 @@ func writeStagingFileWithRetry(tmpName string, data []byte, perm os.FileMode, ma
 		closeErr := tmpFile.Close()
 
 		if writeErr != nil || syncErr != nil || closeErr != nil {
-			return fmt.Errorf("write/sync/close failed (write=%v sync=%v close=%v)", writeErr, syncErr, closeErr)
+			return fmt.Errorf("write/sync/close failed (write=%w sync=%w close=%w)", writeErr, syncErr, closeErr)
 		}
 		return nil
 	})
+}
+
+// openStagingFileSafely opens (creating if needed) the staging file used for
+// crash-safe atomic writes, refusing to blindly follow whatever might
+// already exist at that path. Because CheckPowerLossFile already runs at
+// process boot and panics if a NON-EMPTY staging file is found there, the
+// only pre-existing staging file this should ever encounter mid-run is
+// either (a) a benign leftover — a previous write succeeded but its own
+// cleanup couldn't unlink the now-empty (0-byte) staging file — or (b)
+// something planted by a lower-privileged local attacker: a symlink or a
+// hard link aliasing this name onto a file the attacker cannot write to
+// directly, hoping this process (running with equal or higher privilege)
+// will overwrite the real target through the alias. Opening with O_EXCL
+// (fails outright if anything already exists at tmpName) forces that
+// distinction to be made explicitly instead of silently following whatever
+// is already there via O_TRUNC.
+func openStagingFileSafely(tmpName string, perm os.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err == nil {
+		return f, nil
+	}
+	if !os.IsExist(err) {
+		return nil, err // some other failure (permissions, path issues, etc.) — propagate as-is
+	}
+
+	// Something already exists at tmpName. Only ever safe to reclaim it if
+	// it is a plain, empty, regular file with a single hard link — exactly
+	// what CheckPowerLossFile's own "empty staging file" tolerance
+	// describes. Refuse anything else outright rather than following it.
+	safe, reason, inspectErr := inspectExistingStagingFile(tmpName)
+	if inspectErr != nil {
+		return nil, fmt.Errorf("staging file %q exists but could not be safely inspected: %w", tmpName, inspectErr)
+	}
+	if !safe {
+		return nil, fmt.Errorf("refusing to use staging file %q: %s (possible attack or genuine corruption)", tmpName, reason)
+	}
+
+	// Confirmed benign: remove the empty leftover and retry the exclusive
+	// create so we never write through a pre-existing name.
+	if rmErr := OsRemoveFunc(tmpName); rmErr != nil {
+		return nil, fmt.Errorf("failed to remove confirmed-benign empty staging file %q before recreating it: %w", tmpName, rmErr)
+	}
+	return os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+}
+
+// inspectExistingStagingFile opens path WITHOUT following any reparse point
+// (symlink/junction) that might be there, and reports whether it is safe to
+// reclaim as a benign, previously-written-but-not-yet-cleaned-up staging
+// file: specifically, a plain regular file, zero bytes long, with exactly
+// one hard link (itself).
+//
+// FILE_FLAG_OPEN_REPARSE_POINT is essential here: without it, CreateFile
+// transparently follows a symlink/junction planted at path and reports
+// information about whatever it points AT instead of the link itself, which
+// would make this whole check trivially bypassable by an attacker.
+func inspectExistingStagingFile(path string) (safeToReclaim bool, reason string, err error) {
+	pathPtr, cerr := windows.UTF16PtrFromString(path)
+	if cerr != nil {
+		return false, "", fmt.Errorf("convert path %q to UTF-16: %w", path, cerr)
+	}
+	h, cerr := windows.CreateFile(
+		pathPtr,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	if cerr != nil {
+		return false, "", fmt.Errorf("CreateFile failed: %w", cerr)
+	}
+	defer func() {
+		_ = windows.CloseHandle(h)
+	}()
+
+	var info windows.ByHandleFileInformation
+	if gerr := windows.GetFileInformationByHandle(h, &info); gerr != nil {
+		return false, "", fmt.Errorf("GetFileInformationByHandle failed: %w", gerr)
+	}
+
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return false, "it is a symlink/junction/reparse point, not a plain regular file", nil
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+		return false, "it is a directory, not a regular file", nil
+	}
+	if info.NumberOfLinks > 1 {
+		return false, "it has multiple hard links", nil
+	}
+	if info.FileSizeHigh != 0 || info.FileSizeLow != 0 {
+		size := (uint64(info.FileSizeHigh) << 32) | uint64(info.FileSizeLow)
+		return false, fmt.Sprintf("it already contains data (%d byte(s))", size), nil
+	}
+	return true, "", nil
 }
 
 // neutralizeOrPanic encapsulates the resilience cleanup logic for an abandoned staging file.
