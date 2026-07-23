@@ -761,74 +761,63 @@ func TestCheckEquals(t *testing.T) {
 }
 
 func TestUtf16StringWithinBounds(t *testing.T) {
-	t.Parallel()
+	t.Run("Nil pointers", func(t *testing.T) {
+		var dummy uint16
+		lastByte := unsafe.Pointer(&dummy)
 
-	t.Run("Valid null-terminated string", func(t *testing.T) {
-		// Encoded UTF-16 for "Hello" followed by NULL terminator
-		buf := windows.StringToUTF16("Hello")
-		strPtr := &buf[0]
-		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), len(buf)*2)
-
-		got, ok := utf16StringWithinBounds(strPtr, bufEnd)
-		if !ok {
-			t.Fatalf("expected ok=true, got ok=false")
-		}
-		if got != "Hello" {
-			t.Errorf("expected %q, got %q", "Hello", got)
-		}
-	})
-
-	t.Run("Empty string (only null terminator)", func(t *testing.T) {
-		buf := windows.StringToUTF16("")
-		strPtr := &buf[0]
-		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), len(buf)*2)
-
-		got, ok := utf16StringWithinBounds(strPtr, bufEnd)
-		if !ok {
-			t.Fatalf("expected ok=true, got ok=false")
-		}
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
-
-	t.Run("Missing null terminator within bounds", func(t *testing.T) {
-		// Slice without null terminator: 'F', 'o', 'o'
-		raw := []uint16{'F', 'o', 'o'}
-		strPtr := &raw[0]
-		// Limit bufEnd strictly to the 3 characters (6 bytes)
-		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), len(raw)*2)
-
-		_, ok := utf16StringWithinBounds(strPtr, bufEnd)
-		if ok {
-			t.Errorf("expected ok=false for missing null terminator, got ok=true")
-		}
-	})
-
-	t.Run("Null terminator beyond bufEnd limit", func(t *testing.T) {
-		// Encoded "World" with null terminator at index 5
-		buf := windows.StringToUTF16("World")
-		strPtr := &buf[0]
-		// Restrict bufEnd so it cuts off before the null terminator
-		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), 3*2) // only 3 uint16s allowed
-
-		_, ok := utf16StringWithinBounds(strPtr, bufEnd)
-		if ok {
-			t.Errorf("expected ok=false when null terminator lies past bufEnd, got ok=true")
-		}
-	})
-
-	t.Run("Nil pointer or zero-byte bounds", func(t *testing.T) {
-		dummy := uint16(0)
-		bufEnd := unsafe.Pointer(&dummy)
-
-		if _, ok := utf16StringWithinBounds(nil, bufEnd); ok {
+		if _, ok := utf16StringWithinBounds(nil, lastByte); ok {
 			t.Errorf("expected ok=false when strPtr is nil")
 		}
+		if _, ok := utf16StringWithinBounds(&dummy, nil); ok {
+			t.Errorf("expected ok=false when bufLastByte is nil")
+		}
+	})
 
-		// startAddr == endAddr
-		if _, ok := utf16StringWithinBounds(&dummy, unsafe.Pointer(&dummy)); ok {
-			t.Errorf("expected ok=false when startAddr >= endAddr")
+	t.Run("Pointer out of bounds (start after last byte)", func(t *testing.T) {
+		buf := []uint16{1, 2, 3}
+		// buf spans 6 bytes. Last byte is offset 5.
+		bufStart := unsafe.Pointer(&buf[0])
+		bufLastByte := unsafe.Add(bufStart, len(buf)*2-1) // inclusive last byte
+
+		// strPtr points past bufLastByte
+		invalidStrPtr := (*uint16)(unsafe.Add(bufLastByte, 1))
+
+		if _, ok := utf16StringWithinBounds(invalidStrPtr, bufLastByte); ok {
+			t.Errorf("expected ok=false when startAddr > lastByteAddr")
+		}
+	})
+
+	t.Run("Buffer too small for even one uint16 (1 byte buffer)", func(t *testing.T) {
+		var dummy byte = 'A'
+		// Buffer is 1 byte long. Start and last byte are at the exact same address.
+		bufStart := unsafe.Pointer(&dummy)
+		bufLastByte := bufStart
+
+		strPtr := (*uint16)(bufStart)
+		if _, ok := utf16StringWithinBounds(strPtr, bufLastByte); ok {
+			t.Errorf("expected ok=false for 1-byte buffer (needs at least 2 bytes for uint16)")
+		}
+	})
+
+	t.Run("Valid UTF-16 null-terminated string", func(t *testing.T) {
+		//nolint:errcheck // no need
+		buf, _ := windows.UTF16FromString("hello") // 6 uint16 units ('h','e','l','l','o', 0)
+		bufStart := unsafe.Pointer(&buf[0])
+		bufLastByte := unsafe.Add(bufStart, len(buf)*2-1) // 12 bytes total, offset 0..11
+
+		str, ok := utf16StringWithinBounds(&buf[0], bufLastByte)
+		if !ok || str != "hello" {
+			t.Errorf("expected ('hello', true), got (%q, %v)", str, ok)
+		}
+	})
+
+	t.Run("Missing null terminator before buffer boundary", func(t *testing.T) {
+		buf := []uint16{'h', 'e', 'l', 'l', 'o'} // No null terminator!
+		bufStart := unsafe.Pointer(&buf[0])
+		bufLastByte := unsafe.Add(bufStart, len(buf)*2-1)
+
+		if _, ok := utf16StringWithinBounds(&buf[0], bufLastByte); ok {
+			t.Errorf("expected ok=false when no null terminator exists within bounds")
 		}
 	})
 }
