@@ -21,9 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -755,4 +758,110 @@ func TestCheckEquals(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUtf16StringWithinBounds(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Valid null-terminated string", func(t *testing.T) {
+		// Encoded UTF-16 for "Hello" followed by NULL terminator
+		buf := windows.StringToUTF16("Hello")
+		strPtr := &buf[0]
+		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), len(buf)*2)
+
+		got, ok := utf16StringWithinBounds(strPtr, bufEnd)
+		if !ok {
+			t.Fatalf("expected ok=true, got ok=false")
+		}
+		if got != "Hello" {
+			t.Errorf("expected %q, got %q", "Hello", got)
+		}
+	})
+
+	t.Run("Empty string (only null terminator)", func(t *testing.T) {
+		buf := windows.StringToUTF16("")
+		strPtr := &buf[0]
+		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), len(buf)*2)
+
+		got, ok := utf16StringWithinBounds(strPtr, bufEnd)
+		if !ok {
+			t.Fatalf("expected ok=true, got ok=false")
+		}
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("Missing null terminator within bounds", func(t *testing.T) {
+		// Slice without null terminator: 'F', 'o', 'o'
+		raw := []uint16{'F', 'o', 'o'}
+		strPtr := &raw[0]
+		// Limit bufEnd strictly to the 3 characters (6 bytes)
+		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), len(raw)*2)
+
+		_, ok := utf16StringWithinBounds(strPtr, bufEnd)
+		if ok {
+			t.Errorf("expected ok=false for missing null terminator, got ok=true")
+		}
+	})
+
+	t.Run("Null terminator beyond bufEnd limit", func(t *testing.T) {
+		// Encoded "World" with null terminator at index 5
+		buf := windows.StringToUTF16("World")
+		strPtr := &buf[0]
+		// Restrict bufEnd so it cuts off before the null terminator
+		bufEnd := unsafe.Add(unsafe.Pointer(strPtr), 3*2) // only 3 uint16s allowed
+
+		_, ok := utf16StringWithinBounds(strPtr, bufEnd)
+		if ok {
+			t.Errorf("expected ok=false when null terminator lies past bufEnd, got ok=true")
+		}
+	})
+
+	t.Run("Nil pointer or zero-byte bounds", func(t *testing.T) {
+		dummy := uint16(0)
+		bufEnd := unsafe.Pointer(&dummy)
+
+		if _, ok := utf16StringWithinBounds(nil, bufEnd); ok {
+			t.Errorf("expected ok=false when strPtr is nil")
+		}
+
+		// startAddr == endAddr
+		if _, ok := utf16StringWithinBounds(&dummy, unsafe.Pointer(&dummy)); ok {
+			t.Errorf("expected ok=false when startAddr >= endAddr")
+		}
+	})
+}
+
+func TestGetServiceNamesFromPIDUncached(t *testing.T) {
+	// Test on nonexistent PID (999999999) - should return empty slice without error
+	t.Run("Non-existent PID", func(t *testing.T) {
+		nonExistentPID := uint32(999999999)
+		services, err := GetServiceNamesFromPIDUncached(nonExistentPID)
+		if err != nil {
+			t.Fatalf("unexpected error for nonexistent PID: %v", err)
+		}
+		if len(services) != 0 {
+			t.Errorf("expected 0 services for non-existent PID, got %d: %v", len(services), services)
+		}
+	})
+
+	// Live Windows SCM enumeration test on current test runner PID
+	t.Run("Current Process PID execution", func(t *testing.T) {
+		pid := os.Getpid()
+		if pid < 0 {
+			t.Fatalf("invalid negative PID: %d", pid)
+		}
+		if pid > math.MaxUint32 {
+			t.Fatalf("invalid PID: %d > math.MaxUint32 aka %d", pid, math.MaxUint32)
+		}
+		currentPID := uint32(pid) // #nosec G115
+		services, err := GetServiceNamesFromPIDUncached(currentPID)
+		if err != nil {
+			t.Fatalf("GetServiceNamesFromPIDUncached failed on current PID: %v", err)
+		}
+		// Unless the unit test itself is running inside a Windows Service process,
+		// services will usually be empty, but it confirms no memory crashes or API errors occur.
+		t.Logf("Found %d services associated with current PID %d: %v", len(services), currentPID, services)
+	})
 }
