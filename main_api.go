@@ -825,7 +825,12 @@ func (b *BoundProc) Call(args ...uintptr) WinResult {
 // Find attempts to locate the procedure in the DLL.
 // Returns nil if the procedure is successfully found, or an error if it is not.
 func (b *BoundProc) Find() error {
-	return b.Proc.Find()
+	err := b.Proc.Find()
+	if err == nil {
+		return nil
+	} else {
+		return fmt.Errorf("BoundProc:Find says that LazyProcish/LaziProc.Find() failed, err: %w", err)
+	}
 }
 
 // NewBoundProc initializes a BoundProc by resolving a procedure from the
@@ -1218,7 +1223,7 @@ func resolveExeName(owningPid uint32, remoteAddrStr string) (string, error) {
 	}
 	exe, err3 := GetProcessName(owningPid)
 	if err3 != nil {
-		return "", fmt.Errorf("pid %d not found for %s, errTransient:'%v', err:'%w'", owningPid, remoteAddrStr, err2, err3)
+		return "", fmt.Errorf("pid %d not found for %s, errTransient:'%w', err:'%w'", owningPid, remoteAddrStr, err2, err3) //fine, wrap both then!
 	}
 	return exe, nil
 }
@@ -1801,7 +1806,10 @@ func GoRoutineId() int64 {
 	n := runtime.Stack(buf[:], false)
 	// "goroutine 17 [running]:\n..."
 	var id int64 = -1
-	fmt.Sscanf(string(buf[:n]), "goroutine %d", &id)
+	_, err := fmt.Sscanf(string(buf[:n]), "goroutine %d", &id)
+	if err != nil {
+		GetBugLogger().Error("BUG: unexpected fail from fmt.Sscanf", SafeErr(err))
+	}
 	return id
 }
 
@@ -2436,7 +2444,7 @@ func openStagingFileSafely(tmpName string, perm os.FileMode) (*os.File, error) {
 		return f, nil
 	}
 	if !os.IsExist(err) {
-		return nil, err // some other failure (permissions, path issues, etc.) — propagate as-is
+		return nil, fmt.Errorf("openStagingFileSafely says that os.OpenFile failed(and not because it doesn't exist) to create %q staging file, with err:%w", tmpName, err) // some other failure (permissions, path issues, etc.) — propagate as-is
 	}
 
 	// Something already exists at tmpName. Only ever safe to reclaim it if
@@ -2456,7 +2464,11 @@ func openStagingFileSafely(tmpName string, perm os.FileMode) (*os.File, error) {
 	if rmErr := OsRemoveFunc(tmpName); rmErr != nil {
 		return nil, fmt.Errorf("failed to remove confirmed-benign empty staging file %q before recreating it: %w", tmpName, rmErr)
 	}
-	return os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if fil, ofErr := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm); ofErr != nil {
+		return nil, fmt.Errorf("failed to create staging file %q after removed the existing file (so, directory permissions doesn't allow creating new files? and we shoulda just truncated the existing one to keep ACLs?!), err: %w", tmpName, ofErr)
+	} else {
+		return fil, nil
+	}
 }
 
 // inspectExistingStagingFile opens path WITHOUT following any reparse point
@@ -2486,9 +2498,7 @@ func inspectExistingStagingFile(path string) (safeToReclaim bool, reason string,
 	if cerr != nil {
 		return false, "", fmt.Errorf("CreateFile failed: %w", cerr)
 	}
-	defer func() {
-		_ = windows.CloseHandle(h)
-	}()
+	defer closeHandleLogged(h, "inspectExistingStagingFile:CreateFile h")
 
 	var info windows.ByHandleFileInformation
 	if gerr := windows.GetFileInformationByHandle(h, &info); gerr != nil {
@@ -2514,7 +2524,7 @@ func inspectExistingStagingFile(path string) (safeToReclaim bool, reason string,
 // neutralizeOrPanic encapsulates the resilience cleanup logic for an abandoned staging file.
 // It attempts deletion first. If deletion fails, it forces a truncation down to 0 bytes
 // to neutralize any partial garbage data that would trip up the next boot.
-func neutralizeOrPanic(tmpName string, perm os.FileMode, maxAttempts int, backoff time.Duration, log *slog.Logger, actionErr error, title string, extraPanicMsg string) {
+func neutralizeOrPanic(tmpName string, perm os.FileMode, maxAttempts int, backoff time.Duration, log *slog.Logger, actionErr error, title, extraPanicMsg string) {
 	ondeleteErr := RetryFileOp(maxAttempts, backoff, func() error { return OsRemoveFunc(tmpName) })
 	if ondeleteErr == nil {
 		log.Debug("ExtraSafety: successfully neutralized staging file by deleting it", slog.String("tempfilename", tmpName))
