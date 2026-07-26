@@ -25,6 +25,7 @@ var (
 	}
 )
 
+// mockLazyProc implements your LazyProcishWrapperForMocksN without touching the OS.
 type mockLazyProc4Bench struct{ name string }
 
 func (m *mockLazyProc4Bench) Name() string  { return m.name }
@@ -35,60 +36,81 @@ func (m *mockLazyProc4Bench) Call(args ...uintptr) (uintptr, uintptr, error) {
 }
 
 // ============================================================================
-// 2. REUSABLE WORKLOAD FUNCTIONS (Single Source of Truth)
+// 2. REUSABLE WORKLOAD FUNCTIONS (Documented Single Source of Truth)
 // ============================================================================
 
+// GetCurrentProcessId is a fast, user-mode API. Expects 0 allocations.
 func runArity0Real() {
 	procArity0.Call()
 }
 
+// SetLastError is essentially instantaneous. Expects 0 allocations.
 func runArity1Real() {
 	procArity1.Call(0)
 }
 
+// WaitForSingleObject(0, 0) fails instantly (WAIT_FAILED) with zero pointers. Expects 0 allocations.
 func runArity2Real() {
 	procArity2.Call(0, 0)
 }
 
+// MulDiv performs math on three integers. Zero pointers, zero heap allocations.
 func runArity3Real() {
 	procArity3.Call(10, 20, 30)
 }
 
+// We pass an invalid handle (0) to PeekConsoleInputW so it fails immediately
+// before attempting to dereference the pointers, making it safe and fast.
+// Takes stack-escaped pointers, so it triggers heap allocations.
 func runArity4EscapedPointers() {
 	var rec inputRecord
 	var count uint32
 	procArity4Peek.Call(0, uintptr(unsafe.Pointer(&rec)), 1, uintptr(unsafe.Pointer(&count)))
 }
 
+// PostThreadMessageW takes 4 scalar integer arguments, no pointers.
 func runArity4ScalarReal() {
 	procArity4Post.Call(0, 0, 0, 0)
 }
 
+// Tests the exact same API as Arity1, but forced through the variadic args... wrapper.
+// This allocs the slice (1 alloc) and for each arg 8 bytes (in that same 1 alloc).
 func runArityNReal() {
 	procArityNReal.Call(0)
 }
 
+// SetLastError(0) -> errno = 0 (0 <= 255) => 0 allocs
 func runErrno0() {
 	procArity1.Call(0)
 }
 
+// SetLastError(87) -> errno = 87 (ERROR_INVALID_PARAMETER, 87 <= 255) => 0 allocs
 func runErrno87() {
 	procArity1.Call(87)
 }
 
+// SetLastError(1444) -> errno = 1444 (1444 >= 256) => 1 alloc (8 B/op)
+// This completely confirms that Go's runtime uses its static lookup table for integers between 0 and 255.
+// Returning error codes within this range costs zero heap allocations.
+// Only error codes >= 256 incur an 8-byte heap allocation to box the syscall.Errno integer into the error interface.
 func runErrno1444() {
 	procArity1.Call(1444)
 }
 
+// Success Case: Pass GetCurrentThreadId() => PostThreadMessageW succeeds (errno = 0)
+// Result: 0 allocs / 0 B/op
 func runArity4Success() {
 	tid := uintptr(windows.GetCurrentThreadId())
 	procArity4Post.Call(tid, 0, 0, 0)
 }
 
+// Failure Case: Pass 0 => Fails with ERROR_INVALID_THREAD_ID (errno = 1444)
+// Result: 1 alloc / 8 B/op
 func runArity4Failure() {
 	procArity4Post.Call(0, 0, 0, 0)
 }
 
+// Mocked variadic call: 24 bytes, 1 alloc (8 bytes per arg into variadic slice).
 func runMockedArityN() {
 	procMockedArityN.Call(0, 1, 2)
 }
@@ -120,7 +142,7 @@ func TestSyscallAllocations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// AllocsPerRun runs the closure 1000 times after a warmup run
+			// AllocsPerRun runs the closure 1000 times after a 1-run warmup
 			allocs := testing.AllocsPerRun(1000, tt.workload)
 			if allocs != tt.expectedAllocs {
 				t.Errorf("%s: got %v allocs/op, want %v", tt.name, allocs, tt.expectedAllocs)
