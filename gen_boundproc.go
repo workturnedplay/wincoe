@@ -25,89 +25,201 @@ import (
 
 {{range .}}
 // ----------------------------------------------------------------------------
-// Arity {{.N}}
+// Arity {{.Suffix}}
 // ----------------------------------------------------------------------------
 
-type LazyProcishWrapperForMocks{{.N}} interface {
+// LazyProcishWrapperForMocks{{.Suffix}} is the minimal interface that WinCall{{.Suffix}} needs from a windows.LazyProc-like object.
+//
+// We deliberately avoid the full *windows.LazyProc type to enable mocking.
+type LazyProcishWrapperForMocks{{.Suffix}} interface {
+	// Name returns the name of the procedure (used in error messages).
+	//Why Name() instead of a field? Because interfaces in Go cannot require fields — only methods
 	Name() string
-	Call({{.Args}}) (r1, r2 uintptr, lastErr error)
+
+	// Call invokes the Windows procedure with the given arguments.
+	// Signature must match windows.LazyProc.Call exactly.
+	Call({{.InterfaceArgs}}) (r1, r2 uintptr, lastErr error)
+
 	Find() error
 	Addr() uintptr
 }
 
-type realLazyProc{{.N}} struct {
+// realLazyProc{{.Suffix}} wraps *windows.LazyProc to satisfy interface LazyProcishWrapperForMocks{{.Suffix}}.
+//
+// Embedding gives us .Call() for free via promotion.
+type realLazyProc{{.Suffix}} struct {
 	*windows.LazyProc
 }
 
-func (r *realLazyProc{{.N}}) Name() string {
+// Name implements LazyProcishWrapperForMocks{{.Suffix}}.
+//
+// Returns the procedure name for use in error messages.
+func (r *realLazyProc{{.Suffix}}) Name() string {
 	return r.LazyProc.Name
 }
 
-{{.EscapeDirective}}func (r *realLazyProc{{.N}}) Call({{.Args}}) (r1, r2 uintptr, lastErr error) {
-	// Calling syscall.SyscallN directly with discrete arguments triggers a Go 1.18+ 
-	// compiler intrinsic that entirely avoids variadic slice allocation.
+{{.EscapeDirective}}
+func (r *realLazyProc{{.Suffix}}) Call({{.InterfaceArgs}}) (r1, r2 uintptr, lastErr error) {
+	// Calling syscall.SyscallN directly with discrete(or variadic) arguments triggers a Go 1.18+ 
+	// compiler intrinsic that entirely avoids variadic slice allocation because SyscallN is compiler-special.
+	// so zero allocations instead of 1 of 8 bytes which LazyProc.Call(..) would cause
 	r1, r2, errno := syscall.SyscallN(r.LazyProc.Addr(){{if .CallArgs}}, {{.CallArgs}}{{end}})
 	// SyscallN returns syscall.Errno, which satisfies the error interface.
 	// CheckWinResult handles ERROR_SUCCESS (0) correctly as success.
 	return r1, r2, errno
 }
 
-func MustLoadProc{{.N}}(dll *windows.LazyDLL, name string) LazyProcishWrapperForMocks{{.N}} {
+// MustLoadProc{{.Suffix}} eagerly resolves a procedure from the given DLL and wraps it into a LazyProcishWrapperForMocks{{.Suffix}}.
+// it loads the DLL and resolves the proc, so it unlazifies the whole thing, thus it can panic if DLL or proc cannot be loaded or found
+//
+// It is a thin, validated convenience over dll.NewProc(name) + RealProc(...).
+// This function enforces basic invariants early:
+//   - dll must be non-nil
+//
+// The returned LazyProcishWrapperForMocks{{.Suffix}} is suitable for use with WinCall or higher-level
+// binding helpers such as BindFunc. //FIXME: outdated, BindFunc?!
+//
+// MustLoadProc{{.Suffix}} does NOT attach any failure semantics (WinCheckFunc). Callers must
+// explicitly provide the appropriate check strategy (e.g. CheckBool, CheckHandle)
+// when invoking the procedure via WinCall{{.Suffix}} or when binding it.
+//
+// Panics:
+//   - if dll is nil
+func MustLoadProc{{.Suffix}}(dll *windows.LazyDLL, name string) LazyProcishWrapperForMocks{{.Suffix}} {
 	if dll == nil {
-		panic2("MustLoadProc{{.N}}: nil dll")
+		panic2("MustLoadProc{{.Suffix}}: nil dll")
 	}
-	loadDll(dll)
+	loadDll(dll) // make it non-lazy, load it now if not loaded! or panic if loading fails!
 	lp := dll.NewProc(name)
-	if err := lp.Find(); err != nil {
-		panic2(fmt.Sprintf("MustLoadProc{{.N}}: unable to find windows API function named %q, err: %v", name, err.Error()))
+	if lp == nil {
+		panic2(fmt.Sprintf("MustLoadProc{{.Suffix}}: LazyProc was nil for proc %q in dll %v, this never happens here even if the name isn't found", name, dll))
 	}
-	return &realLazyProc{{.N}}{LazyProc: lp}
+
+	// Force resolution now. Find() returns the address or an error.
+	if err := lp.Find(); err != nil {
+		panic2(fmt.Sprintf("MustLoadProc{{.Suffix}}: unable to find windows API function named %q, err: %v", name, err.Error()))
+	}
+
+	rlp := &realLazyProc{{.Suffix}}{LazyProc: lp}
+	_ = validateAndGetOp(rlp) //FIXME: this is quite useless here, should happen after NewProc time above! but that one doesn't have Name() function only Name field, so pass name as string?
+	return rlp
 }
 
-type BoundProc{{.N}} struct {
-	Proc  LazyProcishWrapperForMocks{{.N}}
+// BoundProcN represents a Windows API procedure permanently bound to a
+// specific failure-checking strategy.
+//
+// It wraps a LazyProcishWrapperForMocks{{.Suffix}} (usually a windows.LazyProc or a mock for tests) and a WinCheckFunc.
+// By using BoundProcN instead of raw Syscall/Call, you centralize error
+// handling logic for the specific API while maintaining the ability to
+// use {{.EscapeDirective}} for memory safety.
+type BoundProc{{.Suffix}} struct {
+	Proc  LazyProcishWrapperForMocks{{.Suffix}}
 	Check WinCheckFunc
 }
 
-{{.EscapeDirective}}func (b *BoundProc{{.N}}) Call({{.Args}}) WinResult {
-	return WinCall{{.N}}(b.Proc, b.Check{{if .CallArgs}}, {{.CallArgs}}{{end}})
+// Call executes the underlying Windows procedure with the provided arguments.
+//
+// SECURITY WARNING: This method uses the {{.EscapeDirective}} compiler directive.
+// To ensure memory safety and prevent "0xc0000005 Access Violation" crashes,
+// any Go pointer passed as an argument MUST be converted to uintptr using
+// uintptr(unsafe.Pointer(&x)) directly within the argument list of the
+// call site.
+// So {{.EscapeDirective}} = escape to heap + keep-alive for the duration of the call.
+// The compiler inserts the necessary liveness (equivalent to an implicit KeepAlive across the entire function call)
+// for any argument passed as uintptr(unsafe.Pointer(...)) to a function marked {{.EscapeDirective}}.
+//
+// Example:
+//
+//	var size uint32
+//	proc.Call(handle, uintptr(unsafe.Pointer(&size)))
+//
+// This direct conversion signals the Go compiler to move the variable to
+// the heap, ensuring its memory address remains stable even if the stack grows.
+//
+{{.EscapeDirective}}
+func (b *BoundProc{{.Suffix}}) Call({{.InterfaceArgs}}) WinResult {
+	return WinCall{{.Suffix}}(b.Proc, b.Check{{if .CallArgs}}, {{.CallArgs}}{{end}})
 }
 
-func (b *BoundProc{{.N}}) Find() error {
+// Find attempts to locate the procedure in the DLL.
+// Returns nil if the procedure is successfully found, or an error if it is not.
+func (b *BoundProc{{.Suffix}}) Find() error {
 	if err := b.Proc.Find(); err != nil {
-		return fmt.Errorf("BoundProc{{.N}}:Find says that LazyProcish/LazyProc.Find() failed, err: %w", err)
+		return fmt.Errorf("BoundProc{{.Suffix}}:Find says that LazyProcishWrapperForMocks{{.Suffix}}/LazyProc.Find() failed, err: %w", err)
 	}
 	return nil
 }
 
-func NewBoundProc{{.N}}(dll *windows.LazyDLL, name string, check WinCheckFunc) *BoundProc{{.N}} {
+// NewBoundProc{{.Suffix}} initializes a BoundProc{{.Suffix}} by resolving a procedure from the
+// provided DLL and attaching a result-checking function.
+// It eagerly resolves the DLL and proc's address so it won't have to do it on the first .Call(..)
+// Each .Call(..) causes 1 heap alloc of 8 bytes due to variadic args, just like LazyProc.Call(..) does!
+//
+// Parameters:
+//   - dll: A pointer to a windows.LazyDLL (e.g., kernel32, user32).
+//   - name: The exact string name of the procedure (e.g., "GetProcessId").
+//   - check: A WinCheckFunc (e.g., CheckBool) used to determine if the
+//     API call failed based on its return value.
+//
+// It panics if the check function is nil.
+func NewBoundProc{{.Suffix}}(dll *windows.LazyDLL, name string, check WinCheckFunc) *BoundProc{{.Suffix}} {
 	if check == nil {
-		panic2("NewBoundProc{{.N}}: nil WinCheckFunc passed as arg")
+		panic2("NewBoundProc{{.Suffix}}: nil WinCheckFunc passed as arg")
 	}
-	return &BoundProc{{.N}}{
-		Proc:  MustLoadProc{{.N}}(dll, name),
+	return &BoundProc{{.Suffix}}{
+		Proc:  MustLoadProc{{.Suffix}}(dll, name),
 		Check: check,
 	}
 }
 
-{{.EscapeDirective}}func WinCall{{.N}}(proc LazyProcishWrapperForMocks{{.N}}, check WinCheckFunc{{if .Args}}, {{.Args}}{{end}}) WinResult {
+// WinCall{{.Suffix}} is the low-level engine that executes the syscall and performs
+// automated error checking.
+//
+// It leverages {{.EscapeDirective}} to signal to the compiler that arguments
+// may be pointers converted to integers. It calls the procedure, captures
+// the return values (r1, r2) and the system error(actually it's GetLastError() and a SetLastError(0) was called before calling the procedure, this is auto-done atomically by Go via SyscallN()),
+//  then passes them to
+// CheckWinResult to produce a clean Go error if the call failed.
+//
+// WARNING: you must do the uintptr casting at the args call place (for pointers on stack!) for this to work and not crash randomly because the stack got moved by Go.
+// The price of absolute memory safety in Go is that you must write uintptr(unsafe.Pointer(...)) explicitly at the exact call site.
+// This tells the compiler, "Pin this variable right now."
+//
+// Use this directly only if you need to bypass the BoundProc abstraction.
+// Otherwise, use BoundProc.Call for better type organization.
+//
+{{.EscapeDirective}}
+func WinCall{{.Suffix}}(proc LazyProcishWrapperForMocks{{.Suffix}}, check WinCheckFunc{{if .InterfaceArgs}}, {{.InterfaceArgs}}{{end}}) WinResult {
 	op := validateAndGetOp(proc)
-	r1, r2, callStatus := proc.Call({{.CallArgs}})
+	r1, r2, callStatus := proc.Call({{.CallArgs}}) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests{{if .IsVariadic}}; so this means it will do 1 alloc of 8 bytes for the variadic slice of args{{end}}
 	return makeWinResult(op, check, r1, r2, callStatus)
 }
 {{end}}
 `
 
 type ProcData struct {
-	N               int
-	Args            string
-	CallArgs        string
+	Suffix          string // "N", "0", "1", "2", etc.
+	InterfaceArgs   string // "args ...uintptr" vs "a1, a2 uintptr"
+	CallArgs        string // "args..." vs "a1, a2"
 	EscapeDirective string
+	IsVariadic      bool
 }
+
+const TheEscapeDirective = "//go:uintptrescapes"
 
 func main() {
 	var data []ProcData
 
+	// 1. Manually inject the variadic "N" case first
+	data = append(data, ProcData{
+		Suffix:          "N",
+		InterfaceArgs:   "args ...uintptr",
+		CallArgs:        "args...",
+		EscapeDirective: TheEscapeDirective,
+		IsVariadic:      true,
+	})
+
+	// 2. Loop through the fixed arities (0 to 9)
 	for i := 0; i <= 9; i++ {
 		var args, callArgs []string
 		for j := 1; j <= i; j++ {
@@ -122,14 +234,15 @@ func main() {
 
 		directive := ""
 		if i > 0 {
-			directive = "//go:uintptrescapes\n"
+			directive = TheEscapeDirective
 		}
 
 		data = append(data, ProcData{
-			N:               i,
-			Args:            argsStr,
+			Suffix:          fmt.Sprintf("%d", i),
+			InterfaceArgs:   argsStr,
 			CallArgs:        strings.Join(callArgs, ", "),
 			EscapeDirective: directive,
+			IsVariadic:      false,
 		})
 	}
 
@@ -155,5 +268,5 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println("Successfully generated boundproc_gen.go")
+	fmt.Println("Successfully generated&formatted boundproc_gen.go")
 }

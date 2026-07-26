@@ -435,8 +435,8 @@ func TestWinCall(t *testing.T) {
 			procName string
 		}{
 			{"empty", ""},
-			// {"single space", " "},
-			// {"multiple spaces", "   "},
+			{"single space", " "},
+			{"multiple spaces", "   "},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -456,7 +456,7 @@ func TestWinCall(t *testing.T) {
 					if !ok {
 						t.Fatalf("expected string panic, got %T: %v", r, r)
 					}
-					if !strings.Contains(msg, "BUG: impossible to have empty name") {
+					if !strings.Contains(msg, "empty name in proc") {
 						t.Errorf("procName=%q: unexpected panic message: %q", tt.procName, msg)
 					}
 				}()
@@ -598,7 +598,7 @@ func assertPanics(t *testing.T, fn func()) {
 
 func TestRealProc2_NilDLLPanics(t *testing.T) {
 	assertPanics(t, func() {
-		MustLoadProc(nil, "MessageBoxW")
+		MustLoadProcN(nil, "MessageBoxW")
 	})
 }
 
@@ -630,7 +630,7 @@ func TestRealProc2_EmptyNamePanics(t *testing.T) { //it panics only because thes
 	for _, name := range []string{"", " ", "\t", "\n"} {
 		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
 			assertPanics(t, func() {
-				MustLoadProc(dll, name)
+				MustLoadProcN(dll, name)
 			})
 		})
 	}
@@ -914,7 +914,6 @@ func TestGetServiceNamesFromPIDUncached(t *testing.T) {
 func TestWinCallFixedArities(t *testing.T) {
 	// Re-use the existing 'tests' table defined at the top of the file
 	for _, tt := range tests {
-
 		// Inline helper to assert results cleanly without redefining the struct type
 		assertRes := func(t *testing.T, res WinResult, arityName string) {
 			t.Helper()
