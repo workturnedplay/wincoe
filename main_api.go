@@ -28,6 +28,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -636,7 +637,8 @@ func (r WinResult) Succeeded() bool {
 func (r WinResult) ErrIs(target error) bool {
 	if target == nil || target == error(windows.ERROR_SUCCESS) { //nolint:errorlint //we're checking for exactly this, not for one of the wrapped ones being ERROR_SUCCESS! aka // exact sentinel check; wrapped errors are intentionally not matched.
 		GetBugLogger().Error(
-			"BUG: WinResult.ErrIs() cannot be used to test for success; either use WinResult.Succeeded() first then WinResult.ErrIs(target_error) (aka this) to check for exact error, or use WinResult.CallStatusIs(target_error) which allows checking for windows.ERROR_SUCCESS! So, dev. needs to change the callsite!",
+			"BUG: WinResult.ErrIs() cannot be used to test for success; either use WinResult.Succeeded() first then WinResult.ErrIs(target_error) (aka this) to check for exact error, or use WinResult.CallStatusIs(target_error) which allows checking for windows.ERROR_SUCCESS! So, dev. needs to change the callsite! ",
+			slog.Any("stack", debug.Stack()),
 		)
 	}
 	return errors.Is(r.Err, target)
@@ -980,6 +982,8 @@ var (
 	//procPeekConsoleInputW = Kernel32.NewProc("PeekConsoleInputW")
 	procPeekConsoleInputW = NewBoundProcN(Kernel32, "PeekConsoleInputW", CheckBool)
 	procReadConsoleInputW = NewBoundProcN(Kernel32, "ReadConsoleInputW", CheckBool)
+
+	User32 = windows.NewLazySystemDLL("user32.dll")
 )
 
 // auto runs before main(), loads the DLLs non-lazily.
