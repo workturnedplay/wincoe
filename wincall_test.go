@@ -31,6 +31,57 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// ----------------------------------------------------------------------------
+// Fixed-Arity Mocks for zero-allocation testing
+// ----------------------------------------------------------------------------
+
+// baseMock holds the common fields to keep the specific arity mocks DRY
+type baseMock struct {
+	name     string
+	nextR1   uintptr
+	nextR2   uintptr
+	nextErr  error
+	findErr  error
+	addr     uintptr
+	callArgs []uintptr
+}
+
+func (m *baseMock) Name() string  { return m.name }
+func (m *baseMock) Find() error   { return m.findErr }
+func (m *baseMock) Addr() uintptr { return m.addr }
+
+// Arity 0
+type mockLazyProc0 struct{ baseMock }
+
+func (m *mockLazyProc0) Call() (uintptr, uintptr, error) {
+	m.callArgs = nil
+	return m.nextR1, m.nextR2, m.nextErr
+}
+
+// Arity 1
+type mockLazyProc1 struct{ baseMock }
+
+func (m *mockLazyProc1) Call(a1 uintptr) (uintptr, uintptr, error) {
+	m.callArgs = []uintptr{a1}
+	return m.nextR1, m.nextR2, m.nextErr
+}
+
+// Arity 2
+type mockLazyProc2 struct{ baseMock }
+
+func (m *mockLazyProc2) Call(a1, a2 uintptr) (uintptr, uintptr, error) {
+	m.callArgs = []uintptr{a1, a2}
+	return m.nextR1, m.nextR2, m.nextErr
+}
+
+// Arity 9
+type mockLazyProc9 struct{ baseMock }
+
+func (m *mockLazyProc9) Call(a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) (uintptr, uintptr, error) {
+	m.callArgs = []uintptr{a1, a2, a3, a4, a5, a6, a7, a8, a9}
+	return m.nextR1, m.nextR2, m.nextErr
+}
+
 // Define the cases we want to cover
 var tests = []struct {
 	name          string
@@ -339,7 +390,7 @@ func TestWinCall(t *testing.T) {
 				nextErr: tt.callErr,
 			}
 
-			res1 := WinCall(mock, tt.isFailure)
+			res1 := WinCallN(mock, tt.isFailure)
 			if res1.R1 != tt.r1 {
 				t.Errorf("Mock wincall was badly coded, r1=%d vs expected tt.r1=%d", res1.R1, tt.r1)
 			}
@@ -410,14 +461,14 @@ func TestWinCall(t *testing.T) {
 					}
 				}()
 
-				_ = WinCall(mock, CheckBool)
+				_ = WinCallN(mock, CheckBool)
 				// if we reach here the defer already failed the test
 			})
 		}
 	})
 }
 
-// mockLazyProc is a controllable fake for LazyProcish.
+// mockLazyProc is a controllable fake
 // Used only in unit tests to simulate any (r1, r2, err) combination.
 type mockLazyProc struct {
 	name     string  // what .Name() returns
@@ -429,18 +480,15 @@ type mockLazyProc struct {
 	callArgs []uintptr // optional: record arguments for assertions
 }
 
-// Name implements LazyProcish
 func (m *mockLazyProc) Name() string {
 	return m.name
 }
 
-// Call implements LazyProcish
 func (m *mockLazyProc) Call(a ...uintptr) (r1, r2 uintptr, lastErr error) {
 	m.callArgs = a // record for possible assertions
 	return m.nextR1, m.nextR2, m.nextErr
 }
 
-// Find implements LazyProcish for testing
 func (m *mockLazyProc) Find() error {
 	return m.findErr
 }
@@ -550,13 +598,13 @@ func assertPanics(t *testing.T, fn func()) {
 
 func TestRealProc2_NilDLLPanics(t *testing.T) {
 	assertPanics(t, func() {
-		RealProc2(nil, "MessageBoxW")
+		MustLoadProc(nil, "MessageBoxW")
 	})
 }
 
 func TestWinCall_NilProcPanics(t *testing.T) {
 	assertPanics(t, func() {
-		WinCall(nil, CheckBool)
+		WinCallN(nil, CheckBool)
 	})
 }
 
@@ -576,13 +624,13 @@ func TestBoolToUintptr(t *testing.T) {
 	}
 }
 
-func TestRealProc2_EmptyNamePanics(t *testing.T) {
+func TestRealProc2_EmptyNamePanics(t *testing.T) { //it panics only because these cannot be found! not because empty/whitespace name!
 	dll := windows.NewLazySystemDLL("kernel32.dll")
 
 	for _, name := range []string{"", " ", "\t", "\n"} {
 		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
 			assertPanics(t, func() {
-				RealProc2(dll, name)
+				MustLoadProc(dll, name)
 			})
 		})
 	}
@@ -592,7 +640,7 @@ func TestNewBoundProc_NilCheckFuncPanics(t *testing.T) {
 	dll := windows.NewLazySystemDLL("kernel32.dll")
 
 	assertPanics(t, func() {
-		NewBoundProc(dll, "GetCurrentProcessId", nil)
+		NewBoundProcN(dll, "GetCurrentProcessId", nil)
 	})
 }
 
@@ -857,4 +905,63 @@ func TestGetServiceNamesFromPIDUncached(t *testing.T) {
 		// services will usually be empty, but it confirms no memory crashes or API errors occur.
 		t.Logf("Found %d services associated with current PID %d: %v", len(services), currentPID, services)
 	})
+}
+
+// ----------------------------------------------------------------------------
+// Fixed-Arity Test Runner
+// ----------------------------------------------------------------------------
+
+func TestWinCallFixedArities(t *testing.T) {
+	// Re-use the existing 'tests' table defined at the top of the file
+	for _, tt := range tests {
+
+		// Inline helper to assert results cleanly without redefining the struct type
+		assertRes := func(t *testing.T, res WinResult, arityName string) {
+			t.Helper()
+			if res.R1 != tt.r1 {
+				t.Errorf("[%s] Mock wincall badly coded, r1=%d vs expected %d", arityName, res.R1, tt.r1)
+			}
+
+			failed := res.Failed()
+			if failed != tt.wantErr {
+				t.Errorf("[%s] WinCall returned err = %v (failed=%v), wantErr %v", arityName, res.Err, failed, tt.wantErr)
+			}
+
+			if tt.expectIsErr != nil {
+				if !res.ErrIs(tt.expectIsErr) {
+					t.Errorf("[%s] expected errors.Is(err, %v) to be true, got false", arityName, tt.expectIsErr)
+				}
+			}
+
+			if tt.expectNoIsErr != nil {
+				if res.ErrIs(tt.expectNoIsErr) {
+					t.Errorf("[%s] Footgun: error incorrectly matches %v", arityName, tt.expectNoIsErr)
+				}
+			}
+		}
+
+		// Run Arity 0
+		t.Run("Arity0_"+tt.name, func(t *testing.T) {
+			m := &mockLazyProc0{baseMock{name: "Mock0_" + tt.name, nextR1: tt.r1, nextErr: tt.callErr}}
+			assertRes(t, WinCall0(m, tt.isFailure), "Arity0")
+		})
+
+		// Run Arity 1
+		t.Run("Arity1_"+tt.name, func(t *testing.T) {
+			m := &mockLazyProc1{baseMock{name: "Mock1_" + tt.name, nextR1: tt.r1, nextErr: tt.callErr}}
+			assertRes(t, WinCall1(m, tt.isFailure, 0xAA), "Arity1")
+		})
+
+		// Run Arity 2
+		t.Run("Arity2_"+tt.name, func(t *testing.T) {
+			m := &mockLazyProc2{baseMock{name: "Mock2_" + tt.name, nextR1: tt.r1, nextErr: tt.callErr}}
+			assertRes(t, WinCall2(m, tt.isFailure, 0xAA, 0xBB), "Arity2")
+		})
+
+		// Run Arity 9
+		t.Run("Arity9_"+tt.name, func(t *testing.T) {
+			m := &mockLazyProc9{baseMock{name: "Mock9_" + tt.name, nextR1: tt.r1, nextErr: tt.callErr}}
+			assertRes(t, WinCall9(m, tt.isFailure, 1, 2, 3, 4, 5, 6, 7, 8, 9), "Arity9")
+		})
+	}
 }
