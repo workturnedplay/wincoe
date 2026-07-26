@@ -138,7 +138,7 @@ type BoundProc{{.Suffix}} struct {
 //
 {{.EscapeDirective}}
 func (b *BoundProc{{.Suffix}}) Call({{.InterfaceArgs}}) WinResult {
-	return WinCall{{.Suffix}}(b.Proc, b.Check{{if .CallArgs}}, {{.CallArgs}}{{end}})
+	return internalWinCall{{.Suffix}}(b.Proc, b.Check{{if .CallArgs}}, {{.CallArgs}}{{end}})
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -190,9 +190,18 @@ func NewBoundProc{{.Suffix}}(dll *windows.LazyDLL, name string, check WinCheckFu
 //
 {{.EscapeDirective}}
 func WinCall{{.Suffix}}(proc LazyProcishWrapperForMocks{{.Suffix}}, check WinCheckFunc{{if .InterfaceArgs}}, {{.InterfaceArgs}}{{end}}) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname:=proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall{{.Suffix}}(proc, check, {{.CallArgs}})
+}
+
+{{.EscapeDirective}}
+func internalWinCall{{.Suffix}}(proc LazyProcishWrapperForMocks{{.Suffix}}, check WinCheckFunc{{if .InterfaceArgs}}, {{.InterfaceArgs}}{{end}}) WinResult {
 	r1, r2, callStatus := proc.Call({{.CallArgs}}) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests{{if .IsVariadic}}; so this means it will do 1 alloc of 8 bytes for the variadic slice of args{{end}}
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 {{end}}
 `

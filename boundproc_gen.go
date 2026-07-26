@@ -123,7 +123,7 @@ type BoundProcN struct {
 //
 //go:uintptrescapes
 func (b *BoundProcN) Call(args ...uintptr) WinResult {
-	return WinCallN(b.Proc, b.Check, args...)
+	return internalWinCallN(b.Proc, b.Check, args...)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -177,9 +177,20 @@ func NewBoundProcN(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCallN(proc LazyProcishWrapperForMocksN, check WinCheckFunc, args ...uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCallN(proc, check, args...)
+	//r1, r2, callStatus := proc.Call(args...) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests; so this means it will do 1 alloc of 8 bytes for the variadic slice of args
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCallN(proc LazyProcishWrapperForMocksN, check WinCheckFunc, args ...uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(args...) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests; so this means it will do 1 alloc of 8 bytes for the variadic slice of args
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -295,7 +306,7 @@ type BoundProc0 struct {
 //
 
 func (b *BoundProc0) Call() WinResult {
-	return WinCall0(b.Proc, b.Check)
+	return internalWinCall0(b.Proc, b.Check)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -347,9 +358,19 @@ func NewBoundProc0(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 
 func WinCall0(proc LazyProcishWrapperForMocks0, check WinCheckFunc) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall0(proc, check)
+	//r1, r2, callStatus := proc.Call() // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+func internalWinCall0(proc LazyProcishWrapperForMocks0, check WinCheckFunc) WinResult {
 	r1, r2, callStatus := proc.Call() // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -466,7 +487,7 @@ type BoundProc1 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc1) Call(a1 uintptr) WinResult {
-	return WinCall1(b.Proc, b.Check, a1)
+	return internalWinCall1(b.Proc, b.Check, a1)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -520,9 +541,20 @@ func NewBoundProc1(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall1(proc LazyProcishWrapperForMocks1, check WinCheckFunc, a1 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall1(proc, check, a1)
+	//r1, r2, callStatus := proc.Call(a1) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall1(proc LazyProcishWrapperForMocks1, check WinCheckFunc, a1 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -639,7 +671,7 @@ type BoundProc2 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc2) Call(a1, a2 uintptr) WinResult {
-	return WinCall2(b.Proc, b.Check, a1, a2)
+	return internalWinCall2(b.Proc, b.Check, a1, a2)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -693,9 +725,20 @@ func NewBoundProc2(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall2(proc LazyProcishWrapperForMocks2, check WinCheckFunc, a1, a2 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall2(proc, check, a1, a2)
+	//r1, r2, callStatus := proc.Call(a1, a2) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall2(proc LazyProcishWrapperForMocks2, check WinCheckFunc, a1, a2 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -812,7 +855,7 @@ type BoundProc3 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc3) Call(a1, a2, a3 uintptr) WinResult {
-	return WinCall3(b.Proc, b.Check, a1, a2, a3)
+	return internalWinCall3(b.Proc, b.Check, a1, a2, a3)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -866,9 +909,20 @@ func NewBoundProc3(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall3(proc LazyProcishWrapperForMocks3, check WinCheckFunc, a1, a2, a3 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall3(proc, check, a1, a2, a3)
+	//r1, r2, callStatus := proc.Call(a1, a2, a3) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall3(proc LazyProcishWrapperForMocks3, check WinCheckFunc, a1, a2, a3 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2, a3) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -985,7 +1039,7 @@ type BoundProc4 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc4) Call(a1, a2, a3, a4 uintptr) WinResult {
-	return WinCall4(b.Proc, b.Check, a1, a2, a3, a4)
+	return internalWinCall4(b.Proc, b.Check, a1, a2, a3, a4)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -1039,9 +1093,20 @@ func NewBoundProc4(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall4(proc LazyProcishWrapperForMocks4, check WinCheckFunc, a1, a2, a3, a4 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall4(proc, check, a1, a2, a3, a4)
+	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall4(proc LazyProcishWrapperForMocks4, check WinCheckFunc, a1, a2, a3, a4 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2, a3, a4) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -1158,7 +1223,7 @@ type BoundProc5 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc5) Call(a1, a2, a3, a4, a5 uintptr) WinResult {
-	return WinCall5(b.Proc, b.Check, a1, a2, a3, a4, a5)
+	return internalWinCall5(b.Proc, b.Check, a1, a2, a3, a4, a5)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -1212,9 +1277,20 @@ func NewBoundProc5(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall5(proc LazyProcishWrapperForMocks5, check WinCheckFunc, a1, a2, a3, a4, a5 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall5(proc, check, a1, a2, a3, a4, a5)
+	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall5(proc LazyProcishWrapperForMocks5, check WinCheckFunc, a1, a2, a3, a4, a5 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -1331,7 +1407,7 @@ type BoundProc6 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc6) Call(a1, a2, a3, a4, a5, a6 uintptr) WinResult {
-	return WinCall6(b.Proc, b.Check, a1, a2, a3, a4, a5, a6)
+	return internalWinCall6(b.Proc, b.Check, a1, a2, a3, a4, a5, a6)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -1385,9 +1461,20 @@ func NewBoundProc6(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall6(proc LazyProcishWrapperForMocks6, check WinCheckFunc, a1, a2, a3, a4, a5, a6 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall6(proc, check, a1, a2, a3, a4, a5, a6)
+	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall6(proc LazyProcishWrapperForMocks6, check WinCheckFunc, a1, a2, a3, a4, a5, a6 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -1504,7 +1591,7 @@ type BoundProc7 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc7) Call(a1, a2, a3, a4, a5, a6, a7 uintptr) WinResult {
-	return WinCall7(b.Proc, b.Check, a1, a2, a3, a4, a5, a6, a7)
+	return internalWinCall7(b.Proc, b.Check, a1, a2, a3, a4, a5, a6, a7)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -1558,9 +1645,20 @@ func NewBoundProc7(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall7(proc LazyProcishWrapperForMocks7, check WinCheckFunc, a1, a2, a3, a4, a5, a6, a7 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall7(proc, check, a1, a2, a3, a4, a5, a6, a7)
+	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall7(proc LazyProcishWrapperForMocks7, check WinCheckFunc, a1, a2, a3, a4, a5, a6, a7 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -1677,7 +1775,7 @@ type BoundProc8 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc8) Call(a1, a2, a3, a4, a5, a6, a7, a8 uintptr) WinResult {
-	return WinCall8(b.Proc, b.Check, a1, a2, a3, a4, a5, a6, a7, a8)
+	return internalWinCall8(b.Proc, b.Check, a1, a2, a3, a4, a5, a6, a7, a8)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -1731,9 +1829,20 @@ func NewBoundProc8(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall8(proc LazyProcishWrapperForMocks8, check WinCheckFunc, a1, a2, a3, a4, a5, a6, a7, a8 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall8(proc, check, a1, a2, a3, a4, a5, a6, a7, a8)
+	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7, a8) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall8(proc LazyProcishWrapperForMocks8, check WinCheckFunc, a1, a2, a3, a4, a5, a6, a7, a8 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7, a8) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 
 // ----------------------------------------------------------------------------
@@ -1850,7 +1959,7 @@ type BoundProc9 struct {
 //
 //go:uintptrescapes
 func (b *BoundProc9) Call(a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) WinResult {
-	return WinCall9(b.Proc, b.Check, a1, a2, a3, a4, a5, a6, a7, a8, a9)
+	return internalWinCall9(b.Proc, b.Check, a1, a2, a3, a4, a5, a6, a7, a8, a9)
 }
 
 // Find attempts to locate the procedure in the DLL.
@@ -1904,7 +2013,18 @@ func NewBoundProc9(dll *windows.LazyDLL, name string, check WinCheckFunc) *Bound
 //
 //go:uintptrescapes
 func WinCall9(proc LazyProcishWrapperForMocks9, check WinCheckFunc, a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) WinResult {
-	op := validateAndGetOp(proc)
+	name := validateAndGetOp(proc)
+	pname := proc.Name()
+	if name != pname {
+		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	}
+	return internalWinCall9(proc, check, a1, a2, a3, a4, a5, a6, a7, a8, a9)
+	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7, a8, a9) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//return makeWinResult(op, check, r1, r2, callStatus)
+}
+
+//go:uintptrescapes
+func internalWinCall9(proc LazyProcishWrapperForMocks9, check WinCheckFunc, a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) WinResult {
 	r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7, a8, a9) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	return makeWinResult(op, check, r1, r2, callStatus)
+	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
