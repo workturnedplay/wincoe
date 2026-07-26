@@ -183,8 +183,6 @@ func WinCallN(proc LazyProcishWrapperForMocksN, check WinCheckFunc, args ...uint
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCallN(proc, check, args...)
-	//r1, r2, callStatus := proc.Call(args...) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests; so this means it will do 1 alloc of 8 bytes for the variadic slice of args
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -364,8 +362,6 @@ func WinCall0(proc LazyProcishWrapperForMocks0, check WinCheckFunc) WinResult {
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall0(proc, check)
-	//r1, r2, callStatus := proc.Call() // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 func internalWinCall0(proc LazyProcishWrapperForMocks0, check WinCheckFunc) WinResult {
@@ -547,8 +543,6 @@ func WinCall1(proc LazyProcishWrapperForMocks1, check WinCheckFunc, a1 uintptr) 
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall1(proc, check, a1)
-	//r1, r2, callStatus := proc.Call(a1) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -731,8 +725,6 @@ func WinCall2(proc LazyProcishWrapperForMocks2, check WinCheckFunc, a1, a2 uintp
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall2(proc, check, a1, a2)
-	//r1, r2, callStatus := proc.Call(a1, a2) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -915,8 +907,6 @@ func WinCall3(proc LazyProcishWrapperForMocks3, check WinCheckFunc, a1, a2, a3 u
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall3(proc, check, a1, a2, a3)
-	//r1, r2, callStatus := proc.Call(a1, a2, a3) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -1099,8 +1089,6 @@ func WinCall4(proc LazyProcishWrapperForMocks4, check WinCheckFunc, a1, a2, a3, 
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall4(proc, check, a1, a2, a3, a4)
-	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -1283,8 +1271,6 @@ func WinCall5(proc LazyProcishWrapperForMocks5, check WinCheckFunc, a1, a2, a3, 
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall5(proc, check, a1, a2, a3, a4, a5)
-	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -1467,8 +1453,6 @@ func WinCall6(proc LazyProcishWrapperForMocks6, check WinCheckFunc, a1, a2, a3, 
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall6(proc, check, a1, a2, a3, a4, a5, a6)
-	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -1651,8 +1635,6 @@ func WinCall7(proc LazyProcishWrapperForMocks7, check WinCheckFunc, a1, a2, a3, 
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall7(proc, check, a1, a2, a3, a4, a5, a6, a7)
-	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -1835,8 +1817,6 @@ func WinCall8(proc LazyProcishWrapperForMocks8, check WinCheckFunc, a1, a2, a3, 
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall8(proc, check, a1, a2, a3, a4, a5, a6, a7, a8)
-	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7, a8) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes
@@ -2019,8 +1999,6 @@ func WinCall9(proc LazyProcishWrapperForMocks9, check WinCheckFunc, a1, a2, a3, 
 		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	}
 	return internalWinCall9(proc, check, a1, a2, a3, a4, a5, a6, a7, a8, a9)
-	//r1, r2, callStatus := proc.Call(a1, a2, a3, a4, a5, a6, a7, a8, a9) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
-	//return makeWinResult(op, check, r1, r2, callStatus)
 }
 
 //go:uintptrescapes

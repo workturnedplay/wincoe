@@ -12,7 +12,8 @@ echo =======================================
 :: -bench=.  : Runs all functions starting with "Benchmark"
 :: -benchmem : Includes memory allocation statistics (CRUCIAL)
 :: -count=1  : Runs the suite once
-go test -run=^$ -bench=. -benchmem ./...
+go test -run="SKIPALLTESTSIWANTTHEBENCHMARKSONLY" -bench=. -benchtime=1s -benchmem -count=2 ./...
+rem go test -bench=. -benchmem ./...
 
 if errorlevel 1 goto :fail
 

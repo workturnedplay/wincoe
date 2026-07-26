@@ -538,6 +538,13 @@ var (
 	CheckMinusOne WinCheckFunc = func(r1 uintptr, _ error) bool { return r1 == ^uintptr(0) }
 
 	// CheckNone never fails. Used for VOID returns or LRESULTs that require manual checking.
+	// XXX: Using anything other than CheckNone and an error outside the 0..255 range happens,
+	// it will cause the .Call(..) to alloc due to Errno becoming the 'error' interface
+	// and possibly more allocs due to fmt.Errorf formatting
+	//  within the CheckWinResult() call which happens internally when error is sensed!
+	// "Go's runtime uses its static lookup table for integers between 0 and 255.
+	// Returning error codes within this range costs zero heap allocations.
+	// Only error codes >= 256 incur one 8-byte heap allocation to box the syscall.Errno integer into the error interface."
 	CheckNone WinCheckFunc = func(_ uintptr, _ error) bool { return false }
 
 	// CheckNTSTATUS indicates failure if the NTSTATUS code is negative
