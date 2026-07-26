@@ -723,7 +723,7 @@ func CheckWinResult(
 }
 
 // UnspecifiedWinApi is the string used when empty op name is used
-const UnspecifiedWinApi string = "unspecified_winapi"
+// const UnspecifiedWinApi string = "unspecified_winapi"
 const THREAD_PRIORITY_ERROR_RETURN int32 = 0x7fffffff
 
 // LazyProcish is the minimal interface that WinCall needs from a LazyProc-like object.
@@ -738,6 +738,7 @@ type LazyProcish interface {
 	// Signature must match windows.LazyProc.Call exactly.
 	Call(a ...uintptr) (r1, r2 uintptr, lastErr error)
 	Find() error
+	Addr() uintptr
 }
 
 // realLazyProc wraps *windows.LazyProc to satisfy LazyProcish.
@@ -888,12 +889,19 @@ func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) WinResult {
 
 	op := strings.TrimSpace(proc.Name())
 	if op == "" {
-		op = UnspecifiedWinApi
+		//op = UnspecifiedWinApi
+		panic2("BUG: impossible to have empty name in proc/LazyProc/LazyProcish/BoundProc, unless it was overwritten after which shouldn't have been!")
 	}
+	return internalWinCall(op, proc, check, args...)
+}
+
+//go:uintptrescapes
+func internalWinCall(op string, proc LazyProcish, check WinCheckFunc, args ...uintptr) WinResult {
 	// args is a []uintptr, but because of //go:uintptrescapes, the caller
 	// has already pinned the memory safely before we get here.
 	//"Go's proc.Call() always atomcially captures LastError immediately after the C code finishes." as 3rd arg aka CallStatus(should rename to lastError ?! or not it's more confusing!)
-	r1, r2, callStatus := proc.Call(args...)
+	r1, r2, callStatus := proc.Call(args...) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests
+	//r1, r2, callStatus := syscall.SyscallN(proc.Addr(), args...) // this is one less wrapper but only 1ns faster than above but fails all tests since they're not mocked!
 	//XXX: don't put anything here, which might call a syscall or it might delete the last error for a potential future GetLastError() call.
 	return WinResult{
 		R1:         r1,

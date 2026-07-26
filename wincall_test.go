@@ -378,7 +378,7 @@ func TestWinCall(t *testing.T) {
 			}
 		})
 	} // for
-	t.Run("WinCall normalizes empty/whitespace proc names", func(t *testing.T) {
+	t.Run("WinCall panics on empty/whitespace proc names", func(t *testing.T) {
 		tests := []struct {
 			name     string
 			procName string
@@ -387,7 +387,6 @@ func TestWinCall(t *testing.T) {
 			{"single space", " "},
 			{"multiple spaces", "   "},
 		}
-
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				mock := &mockLazyProc{
@@ -396,23 +395,23 @@ func TestWinCall(t *testing.T) {
 					nextErr: windows.ERROR_ACCESS_DENIED,
 				}
 
-				res2 := WinCall(mock, CheckBool)
-				//if err == nil {
-				if res2.Succeeded() {
-					t.Fatal("expected error, got nil")
-				}
-				if !res2.Failed() {
-					t.Fatal("expected error, got nil")
-				}
+				defer func() {
+					r := recover()
+					if r == nil {
+						t.Fatal("expected panic, got none")
+					}
+					// optional: assert the exact message if you want stricter checking
+					msg, ok := r.(string)
+					if !ok {
+						t.Fatalf("expected string panic, got %T: %v", r, r)
+					}
+					if !strings.Contains(msg, "BUG: impossible to have empty name") {
+						t.Errorf("procName=%q: unexpected panic message: %q", tt.procName, msg)
+					}
+				}()
 
-				msg := res2.Err.Error()
-
-				// because you're using %q
-				expectedPrefix := `"` + UnspecifiedWinApi + `"`
-
-				if !strings.HasPrefix(msg, expectedPrefix) {
-					t.Errorf("procName=%q: expected prefix %q, got %q", tt.procName, expectedPrefix, msg)
-				}
+				_ = WinCall(mock, CheckBool)
+				// if we reach here the defer already failed the test
 			})
 		}
 	})
@@ -426,6 +425,7 @@ type mockLazyProc struct {
 	nextR2   uintptr
 	nextErr  error // next lastErr from .Call()
 	findErr  error
+	addr     uintptr
 	callArgs []uintptr // optional: record arguments for assertions
 }
 
@@ -443,6 +443,10 @@ func (m *mockLazyProc) Call(a ...uintptr) (r1, r2 uintptr, lastErr error) {
 // Find implements LazyProcish for testing
 func (m *mockLazyProc) Find() error {
 	return m.findErr
+}
+
+func (m *mockLazyProc) Addr() uintptr {
+	return m.addr
 }
 
 func TestWinResult_Methods(t *testing.T) {
