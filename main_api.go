@@ -887,7 +887,8 @@ func WinCall(proc LazyProcish, check WinCheckFunc, args ...uintptr) WinResult {
 		panic2("WinCall: nil proc")
 	}
 
-	op := strings.TrimSpace(proc.Name())
+	//op := strings.TrimSpace(proc.Name())
+	op := proc.Name()
 	if op == "" {
 		//op = UnspecifiedWinApi
 		panic2("BUG: impossible to have empty name in proc/LazyProc/LazyProcish/BoundProc, unless it was overwritten after which shouldn't have been!")

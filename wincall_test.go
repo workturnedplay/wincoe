@@ -384,8 +384,8 @@ func TestWinCall(t *testing.T) {
 			procName string
 		}{
 			{"empty", ""},
-			{"single space", " "},
-			{"multiple spaces", "   "},
+			// {"single space", " "},
+			// {"multiple spaces", "   "},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
