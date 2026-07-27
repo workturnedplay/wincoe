@@ -90,18 +90,39 @@ func MustLoadProc{{.Suffix}}(dll *windows.LazyDLL, name string) LazyProcishWrapp
 		panic2("MustLoadProc{{.Suffix}}: nil dll")
 	}
 	loadDll(dll) // make it non-lazy, load it now if not loaded! or panic if loading fails!
-	lp := dll.NewProc(name)
-	if lp == nil {
-		panic2(fmt.Sprintf("MustLoadProc{{.Suffix}}: LazyProc was nil for proc %q in dll %v, this never happens here even if the name isn't found", name, dll))
-	}
+
+	proc := LazyLoadProc{{.Suffix}}(dll, name)
 
 	// Force resolution now. Find() returns the address or an error.
-	if err := lp.Find(); err != nil {
-		panic2(fmt.Sprintf("MustLoadProc{{.Suffix}}: unable to find windows API function named %q, err: %v", name, err.Error()))
+	if err := proc.Find(); err != nil {
+		panic2(fmt.Sprintf("MustLoadProc{{.Suffix}}: unable to find windows API function named %q actual %q, err: %v", name, proc.Name(), err.Error()))
 	}
 
+	return proc
+}
+
+// LazyLoadProc{{.Suffix}} lazily wraps a procedure from the given DLL into a LazyProcishWrapperForMocks{{.Suffix}}
+// without loading the DLL or resolving the symbol eagerly.
+//
+// Use this for optional Windows APIs that may not exist on older Windows versions.
+//
+// Panics:
+//   - if dll is nil
+func LazyLoadProc{{.Suffix}}(dll *windows.LazyDLL, name string) LazyProcishWrapperForMocks{{.Suffix}} {
+	if dll == nil {
+		panic2("LazyLoadProc{{.Suffix}}: nil dll")
+	}
+	lp := dll.NewProc(name)
+	if lp == nil {
+		panic2(fmt.Sprintf("BUG: unexpected in LazyLoadProc{{.Suffix}}: LazyProc was nil for proc %q in dll %v", name, dll))
+	}
+	
+	//validateProcName(lp) // can't, it's LazyProc.Name as field not Name() as func.!
+
 	rlp := &realLazyProc{{.Suffix}}{LazyProc: lp}
-	_ = validateAndGetOp(rlp) //FIXME: this is quite useless here, should happen after NewProc time above! but that one doesn't have Name() function only Name field, so pass name as string?
+
+	validateProcName(rlp)  //FIXME: this is quite useless here, well it's just late, it should happen after NewProc time above! but that one aka LazyProc doesn't have Name() function only Name field, so pass name as string?
+
 	return rlp
 }
 
@@ -172,6 +193,23 @@ func NewBoundProc{{.Suffix}}(dll *windows.LazyDLL, name string, check WinCheckFu
 	}
 }
 
+// NewLazyBoundProc{{.Suffix}} initializes a BoundProc{{.Suffix}} without eagerly resolving the procedure or DLL.
+// DLL loading and symbol resolution are deferred until the first .Find() or .Call(...) invocation.
+// Use this for optional Windows APIs that may not exist on older Windows versions.
+//
+// Panics:
+//   - if check is nil
+//   - if dll is nil
+func NewLazyBoundProc{{.Suffix}}(dll *windows.LazyDLL, name string, check WinCheckFunc) *BoundProc{{.Suffix}} {
+	if check == nil {
+		panic2("NewLazyBoundProc{{.Suffix}}: nil WinCheckFunc passed as arg")
+	}
+	return &BoundProc{{.Suffix}}{
+		Proc:  LazyLoadProc{{.Suffix}}(dll, name),
+		Check: check,
+	}
+}
+
 // WinCall{{.Suffix}} is the low-level engine that executes the syscall and performs
 // automated error checking.
 //
@@ -190,11 +228,11 @@ func NewBoundProc{{.Suffix}}(dll *windows.LazyDLL, name string, check WinCheckFu
 //
 {{.EscapeDirective}}
 func WinCall{{.Suffix}}(proc LazyProcishWrapperForMocks{{.Suffix}}, check WinCheckFunc{{if .InterfaceArgs}}, {{.InterfaceArgs}}{{end}}) WinResult {
-	name := validateAndGetOp(proc)
-	pname:=proc.Name()
-	if name != pname {
-		panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
-	}
+	validateProcName(proc)
+	// pname:=proc.Name()
+	// if name != pname {
+	// 	panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
+	// }
 	return internalWinCall{{.Suffix}}(proc, check, {{.CallArgs}})
 }
 
@@ -229,7 +267,7 @@ func main() {
 	})
 
 	// 2. Loop through the fixed arities (0 to 9)
-	for i := 0; i <= 9; i++ {
+	for i := 0; i <= 12; i++ {
 		var args, callArgs []string
 		for j := 1; j <= i; j++ {
 			args = append(args, fmt.Sprintf("a%d", j))
