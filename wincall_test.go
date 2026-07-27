@@ -423,7 +423,8 @@ func TestWinCall(t *testing.T) {
 				if errors.Is(res1.Err, tt.expectNoIsErr) {
 					t.Errorf("Footgun detected: error is incorrectly 'Is' compatible with %v , in other words: unexpected: errors.Is(err, %v) == true", tt.expectNoIsErr, tt.expectNoIsErr)
 				}
-				if res1.ErrIs(tt.expectNoIsErr) {
+				// Skip res1.ErrIs if target is windows.ERROR_SUCCESS to avoid triggering the intentionally guarded bug logger warning
+				if tt.expectNoIsErr != windows.ERROR_SUCCESS && res1.ErrIs(tt.expectNoIsErr) {
 					t.Errorf("Footgun detected: error is incorrectly 'Is' compatible with %v , in other words: unexpected: errors.Is(err, %v) == true", tt.expectNoIsErr, tt.expectNoIsErr)
 				}
 			}
@@ -903,7 +904,9 @@ func TestGetServiceNamesFromPIDUncached(t *testing.T) {
 		}
 		// Unless the unit test itself is running inside a Windows Service process,
 		// services will usually be empty, but it confirms no memory crashes or API errors occur.
-		t.Logf("Found %d services associated with current PID %d: %v", len(services), currentPID, services)
+		if len(services) > 0 {
+			t.Fatalf("Found %d (so >0) services associated with current PID %d: %v", len(services), currentPID, services)
+		}
 	})
 }
 
@@ -933,7 +936,10 @@ func TestWinCallFixedArities(t *testing.T) {
 			}
 
 			if tt.expectNoIsErr != nil {
-				if res.ErrIs(tt.expectNoIsErr) {
+				if errors.Is(res.Err, tt.expectNoIsErr) {
+					t.Errorf("[%s] Footgun: error incorrectly matches %v", arityName, tt.expectNoIsErr)
+				}
+				if tt.expectNoIsErr != windows.ERROR_SUCCESS && res.ErrIs(tt.expectNoIsErr) {
 					t.Errorf("[%s] Footgun: error incorrectly matches %v", arityName, tt.expectNoIsErr)
 				}
 			}
