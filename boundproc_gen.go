@@ -225,7 +225,7 @@ func WinCallN(proc LazyProcishWrapperForMocksN, check WinCheckFunc, args ...uint
 
 //go:uintptrescapes
 func internalWinCallN(proc LazyProcishWrapperForMocksN, check WinCheckFunc, args ...uintptr) WinResult {
-	r1, r2, callStatus := proc.Call(args...) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests; so this means it will do 1 alloc of 8 bytes for the variadic slice of args
+	r1, r2, callStatus := proc.Call(args...) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests; so this means it will do a total of 1 alloc of 8 bytes for the variadic slice of args(The only allocation happens at the very top call site when the user calls BoundProcN.Call(a, b, c))
 	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 

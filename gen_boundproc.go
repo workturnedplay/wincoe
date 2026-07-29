@@ -238,7 +238,7 @@ func WinCall{{.Suffix}}(proc LazyProcishWrapperForMocks{{.Suffix}}, check WinChe
 
 {{.EscapeDirective}}
 func internalWinCall{{.Suffix}}(proc LazyProcishWrapperForMocks{{.Suffix}}, check WinCheckFunc{{if .InterfaceArgs}}, {{.InterfaceArgs}}{{end}}) WinResult {
-	r1, r2, callStatus := proc.Call({{.CallArgs}}) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests{{if .IsVariadic}}; so this means it will do 1 alloc of 8 bytes for the variadic slice of args{{end}}
+	r1, r2, callStatus := proc.Call({{.CallArgs}}) // this is one more wrapper ie. windows.LazyProc.Call() but I need it to can use mocked tests{{if .IsVariadic}}; so this means it will do a total of 1 alloc of 8 bytes for the variadic slice of args(The only allocation happens at the very top call site when the user calls BoundProcN.Call(a, b, c)){{end}}
 	return makeWinResult(proc.Name(), check, r1, r2, callStatus)
 }
 {{end}}

@@ -3792,7 +3792,7 @@ func WindowFromPoint(pt POINT) windows.Handle {
 	//This passes the exact 64-bit bit pattern of X and Y packed together into the CPU register (RCX),
 	//  perfectly matching the C ABI expectation without triggering any heap allocations.
 	res := procWindowFromPoint.Call(*(*uintptr)(unsafe.Pointer(&pt))) //it's CheckNone (for good reason) so you can't use res.Failed() here.
-	//XXX: don't need a WindowFromPointRaw because GetLastError() is never set!
+	//XXX: don't need a WindowFromPointRaw because GetLastError() is never set! "According to Microsoft documentation, WindowFromPoint does not set a last-error code on failure."
 
 	return windows.Handle(res.R1)
 }
@@ -3815,18 +3815,23 @@ const (
 //
 // Returns the non-zero window handle (HWND) of the root window, or 0 if no window
 // is present at the point (e.g., clicking on empty desktop space) or if the lookup fails.
-func RootWindowFromPoint(pt POINT) windows.Handle {
-	hwnd := WindowFromPoint(pt)
+//
+// Note: A return handle of 0 with res.Failed() == false indicates no window
+// exists at the given coordinates (e.g., empty desktop space).
+// Callers must check `hwnd != 0` in addition to `!res.Failed()`.
+func RootWindowFromPoint(pt POINT) (windows.Handle, WinResult) {
+	hwnd := WindowFromPoint(pt) // it doesn't set GetLastError()
+
 	if hwnd == 0 { // Expected behavior: clicked on empty desktop space.
-		return 0
+		return 0, WinResult{}
 	}
 
 	// Get the top-level owner of this HWND.
 	// GA_ROOT (2) retrieves the top-level parent window.
-	hwndRoot := GetAncestor(hwnd, GA_ROOT)
+	hwndRoot, res := GetAncestor(hwnd, GA_ROOT)
 	// If hwndRoot is 0, GetAncestor failed (e.g., window was destroyed concurrently).
 	// Otherwise, it returns either the root ancestor or the window itself if already top-level.
-	return hwndRoot
+	return hwndRoot, res //whenever res.Failed() is true, r1 (the handle) is guaranteed to be 0 here. Due to how GetAncestor works atm.
 }
 
 const WM_PAINT = 0x000F
@@ -4050,7 +4055,7 @@ func GetAncestorRaw(hwnd windows.Handle, flags uint32) WinResult {
 //
 // If hwnd is already a top-level window (has no parent), it returns hwnd itself.
 // Returns 0 if the handle is invalid or the API call fails.
-func GetAncestor(hwnd windows.Handle, flags uint32) windows.Handle {
+func GetAncestor(hwnd windows.Handle, flags uint32) (windows.Handle, WinResult) {
 	// return windows.Handle(GetAncestorRaw(hwnd, flags).R1)
 
 	//paranoid checks
@@ -4060,7 +4065,7 @@ func GetAncestor(hwnd windows.Handle, flags uint32) windows.Handle {
 	// 	panic2(fmt.Sprintf("BUG: GetAncestorRaw failed but R1 wasn't 0 but %d, res:%v", handle, res))
 	// }
 	// return windows.Handle(handle)
-	return windows.Handle(res.R1)
+	return windows.Handle(res.R1), res
 }
 
 // GetTopWindow examines the Z-order of the child windows associated with the
@@ -4076,8 +4081,9 @@ func GetAncestor(hwnd windows.Handle, flags uint32) windows.Handle {
 //     WinResult.Err will be nil.
 //  2. Failure: An error occurred (e.g., invalid parent handle). WinResult.Err
 //     will contain the Windows system error code.
-func GetTopWindow(hwnd windows.Handle) WinResult {
-	return procGetTopWindow.Call(uintptr(hwnd))
+func GetTopWindow(hwnd windows.Handle) (windows.Handle, WinResult) {
+	res := procGetTopWindow.Call(uintptr(hwnd))
+	return windows.Handle(res.R1), res
 }
 
 // GW_HWNDNEXT is GetWindow's uCmd code for "next window in Z-order".
@@ -4374,9 +4380,9 @@ func CreatePopupMenuRaw() WinResult {
 }
 
 // CreatePopupMenu creates a drop-down menu, submenu, or shortcut menu.
-func CreatePopupMenu() windows.Handle {
+func CreatePopupMenu() (windows.Handle, WinResult) {
 	res := CreatePopupMenuRaw()
-	return windows.Handle(res.R1)
+	return windows.Handle(res.R1), res
 }
 
 // AppendMenu appends a new item to the end of the specified menu.
@@ -4622,12 +4628,12 @@ func LoadIcon(hInstance windows.Handle, lpIconName *uint16) WinResult {
 }
 
 // LoadIconByID loads an icon using an integer resource ID (e.g., IDI_APPLICATION).
-func LoadIconByID(hInstance windows.Handle, resourceID uint16) WinResult {
+func LoadIconByID(hInstance windows.Handle, resourceID uint16) (windows.Handle, WinResult) {
 	res := procLoadIcon.Call(
 		uintptr(hInstance),
 		uintptr(resourceID),
 	)
-	return res
+	return windows.Handle(res.R1), res
 }
 
 // // LoadIconByName loads an icon using a string resource name.
@@ -4860,7 +4866,9 @@ func GetWindowLongPtrW(hwnd windows.Handle, nIndex int32) WinResult { //uintptr 
 }
 
 // CreateMutex creates or opens a named or unnamed mutex object.
-func CreateMutex(lpMutexAttributes unsafe.Pointer, bInitialOwner bool, lpName *uint16) WinResult {
+//
+// bInitialOwner should be true aka "You must acquire ownership of the mutex before you can release it." otherwise you cannot call ReleaseMutex on it, unless you use WaitForSingleObject (currently not defined in wincoe!)
+func CreateMutex(lpMutexAttributes unsafe.Pointer, bInitialOwner bool, lpName *uint16) (windows.Handle, WinResult) {
 	var initialOwner uintptr
 	if bInitialOwner {
 		initialOwner = 1
@@ -4870,7 +4878,7 @@ func CreateMutex(lpMutexAttributes unsafe.Pointer, bInitialOwner bool, lpName *u
 		initialOwner,
 		uintptr(unsafe.Pointer(lpName)),
 	)
-	return res //windows.Handle(res.R1)
+	return windows.Handle(res.R1), res
 }
 
 // ReleaseMutex releases ownership of the specified mutex object.
@@ -5107,7 +5115,7 @@ func SetWinEventHook(
 	// pfnWinEventProc any, //bad for safety!
 	pfnWinEventProc WinEventProc,
 	idProcess, idThread, dwFlags uint32,
-) WinResult {
+) (windows.Handle, WinResult) {
 	res := procSetWinEventHook.Call(
 		uintptr(eventMin),
 		uintptr(eventMax),
@@ -5119,7 +5127,7 @@ func SetWinEventHook(
 		uintptr(idThread),
 		uintptr(dwFlags),
 	)
-	return res
+	return windows.Handle(res.R1), res
 }
 
 // UnhookWinEvent removes an event hook function created by SetWinEventHook.
