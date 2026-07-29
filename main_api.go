@@ -507,6 +507,25 @@ var (
 	// CheckNullWithLastError returns true (meaning a failure occurred) only if
 	// r1 is 0 AND the Windows API actually set a non-zero last error code.
 	// because r1 can be 0 and still be a success: GetLastError() aka callErr aka CallStatus is 0 aka SUCCESS.
+	// was used for procTrackPopupMenu = NewBoundProc7(User32, "TrackPopupMenu", CheckNullWithLastError)
+	// but it's only good for the variant that doesn't use TPM_RETURNCMD in uFlags and then CheckBool is better!
+	/*
+		FIXME: problem:
+		When you pass TPM_RETURNCMD to TrackPopupMenu:
+
+		Return value 0 is overloaded: It means "User pressed Esc / clicked away" (100% normal) OR "The API call failed" (actual error).
+
+		The Modal Loop Trap: TrackPopupMenu enters a blocking modal message loop to process mouse and keyboard events. While that loop is running, Windows pumps messages, draws tooltips, updates cursors, and invokes shell hooks.
+
+		Stale/Incidental Errors: Any harmless API call happening under the hood inside that modal loop (or even prior to calling TrackPopupMenu) can set a non-zero GetLastError() code (like ERROR_FILE_NOT_FOUND when trying to load a system cursor/theme).
+
+		False Alarm: When the user presses Esc, TrackPopupMenu exits and returns 0. Go's proc.Call() immediately grabs GetLastError(), sees the leftover non-zero error from the message loop, and CheckNullWithLastError falsely concludes: "The function returned 0 and GetLastError() is non-zero, so this must be a failure!"
+
+		Scenario,Return Value (r1),Win32 Behavior
+		User selects an item,Non-zero (TRUE),"Posts a WM_COMMAND message to hwnd with the item ID, then returns TRUE."
+		User dismisses menu (Esc / Click away),Non-zero (TRUE),"Simply closes the menu without posting WM_COMMAND, then returns TRUE."
+		API Failure,Zero (FALSE),Fails to show the menu (e.g. invalid HMENU or HWND).
+	*/
 	CheckNullWithLastError WinCheckFunc = func(r1 uintptr, callErr error) bool {
 		if r1 != 0 {
 			return false // r1 is non-zero, definitely a success
@@ -1176,7 +1195,10 @@ var (
 	procAppendMenu      = NewBoundProc4(User32, "AppendMenuW", CheckBool)
 
 	//"This API returns BOOL only if TPM_RETURNCMD is specified. Otherwise it returns nonzero merely because the menu was displayed.If you don't always pass TPM_RETURNCMD, CheckBool is fine. If you do always pass TPM_RETURNCMD, then returning 0 may simply mean the user dismissed the menu without choosing anything." - chatgpt 5.5
-	procTrackPopupMenu = NewBoundProc7(User32, "TrackPopupMenu", CheckNullWithLastError) //was CheckNone
+	//well CheckNullWithLastError is bad too! because it blocks and during that time other syscalls can setlasterror thus the seen one when this one's done/dismissed is the last one that setlasterror which is unrelated to this syscall!
+	// procTrackPopupMenu = NewBoundProc7(User32, "TrackPopupMenu", CheckNullWithLastError) //was CheckNone
+	procTrackPopupMenuBool = NewBoundProc7(User32, "TrackPopupMenu", CheckBool) //for the caller who avoids the use of TPM_RETURNCMD
+	procTrackPopupMenuCmd  = NewBoundProc7(User32, "TrackPopupMenu", CheckNone) //for the caller that forces the use of TPM_RETURNCMD
 
 	procDestroyMenu  = NewBoundProc1(User32, "DestroyMenu", CheckBool)
 	procGetCursorPos = NewBoundProc1(User32, "GetCursorPos", CheckBool)
@@ -3951,7 +3973,7 @@ func SetForegroundWindow(hwnd windows.Handle) bool {
 
 		Result: CheckBool will catch the 0, look for an error, find nothing, and generate your fallback error string. If you consider "denied focus" to be a hard error, this is fine. If you want to check it manually without generating an error struct, switch to CheckNone.
 	*/
-	//
+	//great so now that the above fixme is done, this is CheckNone here:
 	return procSetForegroundWindow.Call(uintptr(hwnd)).R1 != 0
 }
 
@@ -4033,11 +4055,12 @@ func GetAncestor(hwnd windows.Handle, flags uint32) windows.Handle {
 
 	//paranoid checks
 	res := GetAncestorRaw(hwnd, flags)
-	handle := res.R1
-	if res.Failed() && handle != 0 {
-		panic2(fmt.Sprintf("BUG: GetAncestorRaw failed but R1 wasn't 0 but %d, res:%v", handle, res))
-	}
-	return windows.Handle(handle)
+	// handle := res.R1
+	// if res.Failed() && handle != 0 {
+	// 	panic2(fmt.Sprintf("BUG: GetAncestorRaw failed but R1 wasn't 0 but %d, res:%v", handle, res))
+	// }
+	// return windows.Handle(handle)
+	return windows.Handle(res.R1)
 }
 
 // GetTopWindow examines the Z-order of the child windows associated with the
@@ -4209,7 +4232,7 @@ func NtSetInformationProcess(hProcess windows.Handle, processInformationClass ui
 		uintptr(hProcess),
 		uintptr(processInformationClass),
 		uintptr(processInformation),
-		uintptr(processInformationLength),
+		processInformationLength,
 	)
 }
 
@@ -4370,15 +4393,49 @@ func AppendMenu(hMenu windows.Handle, uFlags uint32, uIDNewItem uintptr, lpNewIt
 
 const TPM_RETURNCMD = 0x0100
 
-// TrackPopupMenu displays a shortcut menu at the specified screen coordinates
-// and tracks item selection.
+// // TrackPopupMenu displays a shortcut menu at the specified screen coordinates
+// // and tracks item selection.
+// //
+// // Returns the command ID selected by the user (or non-zero success status depending
+// // on uFlags). If the user cancels the menu (e.g., clicks away or presses Esc),
+// // WinResult.R1 will be 0 and WinResult.Err will be nil.
+// // If an actual system error occurs, WinResult.Err will contain the error.
+// func TrackPopupMenu(hMenu windows.Handle, uFlags uint32, x, y int32, hwnd windows.Handle, prcRect *RECT) WinResult {
+// 	return procTrackPopupMenu.Call(
+// 		uintptr(hMenu),
+// 		uintptr(uFlags),
+// 		// #nosec G115
+// 		uintptr(x),
+// 		// #nosec G115
+// 		uintptr(y),
+// 		0, // Reserved, must be 0
+// 		uintptr(hwnd),
+// 		uintptr(unsafe.Pointer(prcRect)),
+// 	)
+// }
+
+// Bound to procTrackPopupMenu with CheckBool
+
+// TrackPopupMenuWithoutReturnCmd displays a shortcut menu and posts WM_COMMAND messages
+// to the specified window when an item is selected.
 //
-// Returns the command ID selected by the user (or non-zero success status depending
-// on uFlags). If the user cancels the menu (e.g., clicks away or presses Esc),
-// WinResult.R1 will be 0 and WinResult.Err will be nil.
-// If an actual system error occurs, WinResult.Err will contain the error.
-func TrackPopupMenu(hMenu windows.Handle, uFlags uint32, x, y int32, hwnd windows.Handle, prcRect *RECT) WinResult {
-	return procTrackPopupMenu.Call(
+// Returns a successful WinResult if the menu was displayed and tracked,
+// or an error if the API call failed.
+func TrackPopupMenuWithoutReturnCmd(
+	hMenu windows.Handle,
+	uFlags uint32,
+	x, y int32,
+	hwnd windows.Handle,
+	prcRect *RECT,
+) WinResult {
+	if uFlags&TPM_RETURNCMD != 0 {
+		panic2("BUG: you called TrackPopupMenuWithoutReturnCmd with TPM_RETURNCMD!")
+		panic(nil)
+	}
+	// Ensure TPM_RETURNCMD is NOT set
+	uFlags &^= TPM_RETURNCMD
+
+	return procTrackPopupMenuBool.Call(
 		uintptr(hMenu),
 		uintptr(uFlags),
 		// #nosec G115
@@ -4389,6 +4446,41 @@ func TrackPopupMenu(hMenu windows.Handle, uFlags uint32, x, y int32, hwnd window
 		uintptr(hwnd),
 		uintptr(unsafe.Pointer(prcRect)),
 	)
+}
+
+// Bound to procTrackPopupMenu with CheckNone
+
+// TrackPopupMenuCmd displays a shortcut menu and synchronously returns the ID
+// of the item selected by the user.
+//
+// Automatically includes TPM_RETURNCMD in uFlags. Returns 0 if the user dismissed
+// the menu without making a selection (or if a system error occurred).
+func TrackPopupMenuCmd(
+	hMenu windows.Handle,
+	uFlags uint32,
+	x, y int32,
+	hwnd windows.Handle,
+	prcRect *RECT,
+) (uint32, WinResult) {
+	// Automatically force TPM_RETURNCMD
+	uFlags |= TPM_RETURNCMD
+
+	res := procTrackPopupMenuCmd.Call(
+		uintptr(hMenu),
+		uintptr(uFlags),
+		// #nosec G115
+		uintptr(x),
+		// #nosec G115
+		uintptr(y),
+		0, // Reserved, must be 0
+		uintptr(hwnd),
+		uintptr(unsafe.Pointer(prcRect)),
+	)
+
+	if res.R1 > math.MaxUint32 {
+		panic2(fmt.Sprintf("BUG: TrackPopupMenuCmd returned R1 %d exceeding MaxUint32 %d", res.R1, math.MaxUint32))
+	}
+	return uint32(res.R1), res
 }
 
 // DestroyMenu destroys the specified menu and frees allocated memory.
@@ -4677,14 +4769,14 @@ func SetThreadPriority(hThread windows.Handle, nPriority int32) WinResult {
 }
 
 // GetThreadPriority retrieves the priority value for the specified thread.
-func GetThreadPriority(hThread windows.Handle) int32 {
+func GetThreadPriority(hThread windows.Handle) (int32, WinResult) {
 	res := procGetThreadPriority.Call(uintptr(hThread))
-	if res.Failed() { // paranoid check
-		panic2(fmt.Sprintf("BUG: GetThreadPriority should always return same value, res:%v", res))
-		panic(nil)
-	}
+	// if res.Failed() { // paranoid check
+	// 	panic2(fmt.Sprintf("BUG: GetThreadPriority should always return same value, res:%v", res))
+	// 	panic(nil)
+	// }
 	// #nosec G115
-	return int32(res.R1)
+	return int32(res.R1), res
 }
 
 const (
