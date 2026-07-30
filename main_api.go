@@ -4586,39 +4586,22 @@ func AttachThreadInput(idAttach, idAttachTo uint32, fAttach bool) WinResult {
 	)
 }
 
-// MAKEINTRESOURCE converts an integer resource ID into a *uint16
-// suitable for Win32 functions like LoadIcon, LoadImage, etc.
-//
-// Converting 32512 to unsafe.Pointer does not confuse the Go Garbage Collector because values
-// under 65,536 reside in the OS-reserved unmapped lower memory space, so GC ignores them
-func MAKEINTRESOURCE(id uint16) *uint16 {
-	//return (*uint16)(unsafe.Pointer(uintptr(id))) //nolint:govet // #nosec G103 // this still has warning!
-
-	/*
-		How it works:unsafe.Pointer(nil) creates a zero-valued pointer ($0$).unsafe.Add(..., id)
-		adds $0 + \text{id} = \text{id}$.(*uint16)(...) casts the result to *uint16.go vet sees
-		valid standard pointer arithmetic and stays quiet.
-	*/
-	return (*uint16)(unsafe.Add(unsafe.Pointer(nil), id))
-}
-
 const IDI_APPLICATION = 32512
 
-var IDI_APPLICATION_RESOURCE = MAKEINTRESOURCE(IDI_APPLICATION)
-
-// LoadIcon loads the specified icon resource.
+// LoadIcon is a low-level wrapper around User32 LoadIconW that accepts a pre-allocated
+// null-terminated UTF-16 string pointer (*uint16).
 //
-// --- Usage Examples ---
+// WARNING: lpIconName MUST be a valid memory pointer to a UTF-16 string (e.g., created via
+// windows.UTF16PtrFromString). Do NOT pass integer resource IDs cast to pointers here, as doing so
+// will trigger runtime panics under Go's '-d=checkptr' validation. For numeric IDs, use LoadIconByID.
 //
-// 1. Loading a System Icon by ID:
-// hIcon1 := LoadIcon(0, MAKEINTRESOURCE(IDI_APPLICATION))
+// Parameters:
+//   - hInstance: Handle to the module whose executable file contains the icon resource.
+//   - lpIconName: Pointer to a null-terminated UTF-16 string specifying the resource name.
 //
-// 2.
-// hIcon1 := LoadIcon(0, IDI_APPLICATION_RESOURCE)
-//
-// 3. Loading a Custom Icon by String Name:
-// iconNamePtr, _ := windows.UTF16PtrFromString("MY_ICON_RESOURCE")
-// hIcon2 := LoadIcon(hInstance, iconNamePtr)
+// Return values:
+//   - windows.Handle: Handle to the loaded icon (HICON).
+//   - WinResult: Call status and error details if the call fails.
 func LoadIcon(hInstance windows.Handle, lpIconName *uint16) (windows.Handle, WinResult) {
 	res := procLoadIcon.Call(
 		uintptr(hInstance),
@@ -4627,9 +4610,36 @@ func LoadIcon(hInstance windows.Handle, lpIconName *uint16) (windows.Handle, Win
 	return windows.Handle(res.R1), res
 }
 
-// LoadIconByID loads an icon using an integer resource ID (e.g., IDI_APPLICATION).
+// LoadIconByName loads an icon resource using a standard Go UTF-8 string name.
 //
-// hInstance = 0 (NULL): Tells Windows "Look inside Windows' system DLLs for standard built-in icons" (like IDI_APPLICATION, IDI_WARNING, IDI_SHIELD).
+// It automatically converts the string into a null-terminated UTF-16 pointer and invokes LoadIcon.
+//
+// Parameters:
+//   - hInstance: Handle to the module whose executable file contains the icon resource.
+//   - name: The named identifier of the icon resource in the PE executable resource table.
+//
+// Return values:
+//   - windows.Handle: Handle to the loaded icon (HICON).
+//   - WinResult: Call status and error details if string conversion or Win32 loading fails.
+func LoadIconByName(hInstance windows.Handle, name string) (windows.Handle, WinResult) {
+	namePtr, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return 0, WinResult{Err: err}
+	}
+	return LoadIcon(hInstance, namePtr)
+}
+
+// LoadIconByID loads an icon resource specified by a numeric integer ID.
+//
+// Parameters:
+//   - hInstance: Handle to the module whose executable file contains the icon resource.
+//     Pass 0 (NULL) to load standard built-in Windows system icons (e.g., wincoe.IDI_APPLICATION).
+//     Pass your application's module handle (selfHInstance) to load custom embedded resources.
+//   - resourceID: The 16-bit numeric identifier of the icon resource (e.g., 1 or IDI_APPLICATION).
+//
+// Return values:
+//   - windows.Handle: Handle to the loaded icon (HICON).
+//   - WinResult: Call status and error details if the call fails.
 func LoadIconByID(hInstance windows.Handle, resourceID uint16) (windows.Handle, WinResult) {
 	res := procLoadIcon.Call(
 		uintptr(hInstance),
