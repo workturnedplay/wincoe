@@ -3270,9 +3270,13 @@ func SetLastError() {
 	panic2("BUG: don't use SetLastError because it's ran and set to 0 before each syscall and GetLastError() is what 3rd arg of LazyProc.Call(..) returns or if using wrapper it's in WinResult.CallStatus!")
 }
 
-const CTRL_C_EVENT = 0
-const CTRL_BREAK_EVENT = 1
-const CTRL_CLOSE_EVENT = 2
+const (
+	CTRL_C_EVENT        = windows.CTRL_C_EVENT        //0
+	CTRL_BREAK_EVENT    = windows.CTRL_BREAK_EVENT    //1
+	CTRL_CLOSE_EVENT    = windows.CTRL_CLOSE_EVENT    //2
+	CTRL_LOGOFF_EVENT   = windows.CTRL_LOGOFF_EVENT   //5
+	CTRL_SHUTDOWN_EVENT = windows.CTRL_SHUTDOWN_EVENT //6
+)
 
 // ConsoleCtrlHandler is the required signature for Windows console control handlers.
 // Return 1 (TRUE) if the event was handled, or 0 (FALSE) to pass it to the next handler.
