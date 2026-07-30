@@ -1088,6 +1088,7 @@ var (
 	Advapi32 = windows.NewLazySystemDLL("advapi32.dll")
 	Ntdll    = windows.NewLazySystemDLL("ntdll.dll")
 	Wtsapi32 = windows.NewLazySystemDLL("wtsapi32.dll")
+	Setupapi = windows.NewLazySystemDLL("setupapi.dll")
 
 	procGetExtendedUdpTable = NewBoundProc6(Iphlpapi, "GetExtendedUdpTable", CheckErrno)
 	procGetExtendedTcpTable = NewBoundProc6(Iphlpapi, "GetExtendedTcpTable", CheckErrno)
@@ -1368,6 +1369,14 @@ var (
 	procDeleteIPForwardEntry = NewBoundProc1(Iphlpapi, "DeleteIpForwardEntry", CheckErrno)
 	procGetIfTable           = NewBoundProc3(Iphlpapi, "GetIfTable", CheckErrno)
 	procGetIPAddrTable       = NewBoundProc3(Iphlpapi, "GetIpAddrTable", CheckErrno)
+
+	procSetupDiGetClassDevs              = NewBoundProc4(Setupapi, "SetupDiGetClassDevsW", CheckHandle)
+	procSetupDiEnumDeviceInfo            = NewBoundProc3(Setupapi, "SetupDiEnumDeviceInfo", CheckBool)
+	procSetupDiDestroyDeviceInfoList     = NewBoundProc1(Setupapi, "SetupDiDestroyDeviceInfoList", CheckBool)
+	procSetupDiGetDeviceInstanceId       = NewBoundProc5(Setupapi, "SetupDiGetDeviceInstanceIdW", CheckBool)
+	procSetupDiGetDeviceRegistryProperty = NewBoundProc7(Setupapi, "SetupDiGetDeviceRegistryPropertyW", CheckBool)
+	procSetupDiSetClassInstallParams     = NewBoundProc4(Setupapi, "SetupDiSetClassInstallParamsW", CheckBool)
+	procSetupDiCallClassInstaller        = NewBoundProc3(Setupapi, "SetupDiCallClassInstaller", CheckBool)
 )
 
 // auto runs before main(), loads the DLLs non-lazily.
@@ -5476,4 +5485,114 @@ func GetIfTable(pIfTable unsafe.Pointer, pdwSize *uint32, bOrder bool) WinResult
 // GetIpAddrTable retrieves the interface-to-IPv4 address mapping table.
 func GetIpAddrTable(pIpAddrTable unsafe.Pointer, pdwSize *uint32, bOrder bool) WinResult {
 	return procGetIPAddrTable.Call(uintptr(pIpAddrTable), uintptr(unsafe.Pointer(pdwSize)), boolToUintptr(bOrder))
+}
+
+// --- Hook Structs ---
+
+type KBDLLHOOKSTRUCT struct { // TODO: see what's the difference between this and KEYBDINPUT struct! did we misalign something?! tho both seem to work.
+	VkCode      uint32
+	ScanCode    uint32
+	Flags       uint32
+	Time        uint32
+	DwExtraInfo uintptr
+}
+
+// --- SetupAPI Structs and Constants ---
+
+type SP_DEVINFO_DATA struct {
+	CbSize    uint32
+	ClassGuid windows.GUID
+	DevInst   uint32
+	Reserved  uintptr
+}
+
+type SP_CLASSINSTALL_HEADER struct {
+	CbSize          uint32
+	InstallFunction uint32
+}
+
+type SP_PROPCHANGE_PARAMS struct {
+	ClassInstallHeader SP_CLASSINSTALL_HEADER
+	StateChange        uint32
+	Scope              uint32
+	HwProfile          uint32
+}
+
+const (
+	DIGCF_DEFAULT         = 0x00000001
+	DIGCF_PRESENT         = 0x00000002
+	DIGCF_ALLCLASSES      = 0x00000004
+	DIGCF_PROFILE         = 0x00000008
+	DIGCF_DEVICEINTERFACE = 0x00000010
+
+	SPDRP_DEVICEDESC = 0x00000000
+
+	DIF_PROPERTYCHANGE = 0x00000012
+	DICS_PROPCHANGE    = 0x00000003
+	DICS_FLAG_GLOBAL   = 0x00000001
+
+	HC_ACTION = 0
+)
+
+// --- SetupAPI Wrappers ---
+
+func SetupDiGetClassDevs(classGuid *windows.GUID, enumerator *uint16, hwndParent windows.Handle, flags uint32) (windows.Handle, WinResult) {
+	res := procSetupDiGetClassDevs.Call(
+		uintptr(unsafe.Pointer(classGuid)),
+		uintptr(unsafe.Pointer(enumerator)),
+		uintptr(hwndParent),
+		uintptr(flags),
+	)
+	return windows.Handle(res.R1), res
+}
+
+func SetupDiEnumDeviceInfo(deviceInfoSet windows.Handle, memberIndex uint32, deviceInfoData *SP_DEVINFO_DATA) WinResult {
+	return procSetupDiEnumDeviceInfo.Call(
+		uintptr(deviceInfoSet),
+		uintptr(memberIndex),
+		uintptr(unsafe.Pointer(deviceInfoData)),
+	)
+}
+
+func SetupDiDestroyDeviceInfoList(deviceInfoSet windows.Handle) WinResult {
+	return procSetupDiDestroyDeviceInfoList.Call(uintptr(deviceInfoSet))
+}
+
+func SetupDiGetDeviceInstanceId(deviceInfoSet windows.Handle, deviceInfoData *SP_DEVINFO_DATA, deviceInstanceId *uint16, deviceInstanceIdSize uint32, requiredSize *uint32) WinResult {
+	return procSetupDiGetDeviceInstanceId.Call(
+		uintptr(deviceInfoSet),
+		uintptr(unsafe.Pointer(deviceInfoData)),
+		uintptr(unsafe.Pointer(deviceInstanceId)),
+		uintptr(deviceInstanceIdSize),
+		uintptr(unsafe.Pointer(requiredSize)),
+	)
+}
+
+func SetupDiGetDeviceRegistryProperty(deviceInfoSet windows.Handle, deviceInfoData *SP_DEVINFO_DATA, property uint32, propertyRegDataType *uint32, propertyBuffer *byte, propertyBufferSize uint32, requiredSize *uint32) WinResult {
+	return procSetupDiGetDeviceRegistryProperty.Call(
+		uintptr(deviceInfoSet),
+		uintptr(unsafe.Pointer(deviceInfoData)),
+		uintptr(property),
+		uintptr(unsafe.Pointer(propertyRegDataType)),
+		uintptr(unsafe.Pointer(propertyBuffer)),
+		uintptr(propertyBufferSize),
+		uintptr(unsafe.Pointer(requiredSize)),
+	)
+}
+
+func SetupDiSetClassInstallParams(deviceInfoSet windows.Handle, deviceInfoData *SP_DEVINFO_DATA, classInstallParams *SP_PROPCHANGE_PARAMS, classInstallParamsSize uint32) WinResult {
+	return procSetupDiSetClassInstallParams.Call(
+		uintptr(deviceInfoSet),
+		uintptr(unsafe.Pointer(deviceInfoData)),
+		uintptr(unsafe.Pointer(classInstallParams)),
+		uintptr(classInstallParamsSize),
+	)
+}
+
+func SetupDiCallClassInstaller(installFunction uint32, deviceInfoSet windows.Handle, deviceInfoData *SP_DEVINFO_DATA) WinResult {
+	return procSetupDiCallClassInstaller.Call(
+		uintptr(installFunction),
+		uintptr(deviceInfoSet),
+		uintptr(unsafe.Pointer(deviceInfoData)),
+	)
 }
