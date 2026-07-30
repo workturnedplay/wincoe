@@ -1360,6 +1360,14 @@ var (
 	// (visible or not), not a failure indicator -- also CheckNone.
 	procIsWindowVisible = NewBoundProc1(User32, "IsWindowVisible", CheckNone)
 	procIsWindow        = NewBoundProc1(User32, "IsWindow", CheckNone)
+
+	// Iphlpapi routing procs
+	procGetBestInterface     = NewBoundProc2(Iphlpapi, "GetBestInterface", CheckErrno)
+	procGetIPForwardTable    = NewBoundProc3(Iphlpapi, "GetIpForwardTable", CheckErrno)
+	procCreateIPForwardEntry = NewBoundProc1(Iphlpapi, "CreateIpForwardEntry", CheckErrno)
+	procDeleteIPForwardEntry = NewBoundProc1(Iphlpapi, "DeleteIpForwardEntry", CheckErrno)
+	procGetIfTable           = NewBoundProc3(Iphlpapi, "GetIfTable", CheckErrno)
+	procGetIPAddrTable       = NewBoundProc3(Iphlpapi, "GetIpAddrTable", CheckErrno)
 )
 
 // auto runs before main(), loads the DLLs non-lazily.
@@ -3271,9 +3279,11 @@ func SetLastError() {
 }
 
 const (
-	CTRL_C_EVENT        = windows.CTRL_C_EVENT        //0
-	CTRL_BREAK_EVENT    = windows.CTRL_BREAK_EVENT    //1
-	CTRL_CLOSE_EVENT    = windows.CTRL_CLOSE_EVENT    //2
+	CTRL_C_EVENT     = windows.CTRL_C_EVENT     //0
+	CTRL_BREAK_EVENT = windows.CTRL_BREAK_EVENT //1
+	//clicked the close button on top right:
+	CTRL_CLOSE_EVENT = windows.CTRL_CLOSE_EVENT //2
+	//if win11 wants to restart/shutdown:
 	CTRL_LOGOFF_EVENT   = windows.CTRL_LOGOFF_EVENT   //5
 	CTRL_SHUTDOWN_EVENT = windows.CTRL_SHUTDOWN_EVENT //6
 )
@@ -5369,3 +5379,101 @@ const (
 	SM_CXVIRTUALSCREEN = 78
 	SM_CYVIRTUALSCREEN = 79
 )
+
+// --- Routing & Interface Structs ---
+
+type MIB_IPFORWARDROW struct {
+	ForwardDest      uint32
+	ForwardMask      uint32
+	ForwardPolicy    uint32
+	ForwardNextHop   uint32
+	ForwardIfIndex   uint32
+	ForwardType      uint32
+	ForwardProto     uint32
+	ForwardAge       uint32
+	ForwardNextHopAS uint32
+	ForwardMetric1   uint32
+	ForwardMetric2   uint32
+	ForwardMetric3   uint32
+	ForwardMetric4   uint32
+	ForwardMetric5   uint32
+}
+
+type MIB_IFROW struct {
+	WszName         [256]uint16
+	Index           uint32
+	Type            uint32
+	Mtu             uint32
+	Speed           uint32
+	PhysAddrLen     uint32
+	PhysAddr        [8]byte
+	AdminStatus     uint32
+	OperStatus      uint32
+	LastChange      uint32
+	InOctets        uint32
+	InUcastPkts     uint32
+	InNUcastPkts    uint32
+	InDiscards      uint32
+	InErrors        uint32
+	InUnknownProtos uint32
+	OutOctets       uint32
+	OutUcastPkts    uint32
+	OutNUcastPkts   uint32
+	OutDiscards     uint32
+	OutErrors       uint32
+	OutQLen         uint32
+	DescrLen        uint32
+	Descr           [256]byte
+}
+
+type MIB_IPFORWARDTABLE struct {
+	NumEntries uint32
+	Table      [1]MIB_IPFORWARDROW // placeholder for dynamic allocation
+}
+
+type MIB_IPADDRROW struct {
+	Addr      uint32
+	Index     uint32
+	Mask      uint32
+	BCastAddr uint32
+	ReasmSize uint32
+	Unused1   uint16
+	Unused2   uint16
+}
+
+type MIB_IPADDRTABLE struct {
+	NumEntries uint32
+	Table      [1]MIB_IPADDRROW // Anchor for the array
+}
+
+// --- Routing API Wrappers ---
+
+// GetBestInterface retrieves the index of the interface that has the best route to the specified IPv4 address.
+func GetBestInterface(dwDestAddr uint32, pdwBestIfIndex *uint32) WinResult {
+	return procGetBestInterface.Call(uintptr(dwDestAddr), uintptr(unsafe.Pointer(pdwBestIfIndex)))
+}
+
+// GetIpForwardTable retrieves the IPv4 routing table.
+func GetIpForwardTable(pIpForwardTable unsafe.Pointer, pdwSize *uint32, bOrder bool) WinResult {
+	return procGetIPForwardTable.Call(uintptr(pIpForwardTable), uintptr(unsafe.Pointer(pdwSize)), boolToUintptr(bOrder))
+}
+
+// CreateIpForwardEntry creates a route in the local computer's IPv4 routing table.
+func CreateIpForwardEntry(pRoute unsafe.Pointer) WinResult {
+	return procCreateIPForwardEntry.Call(uintptr(pRoute))
+}
+
+// DeleteIpForwardEntry deletes an existing route in the local computer's IPv4 routing table.
+func DeleteIpForwardEntry(pRoute unsafe.Pointer) WinResult {
+	return procDeleteIPForwardEntry.Call(uintptr(pRoute))
+}
+
+// GetIfTable retrieves the MIB-II interface table.
+func GetIfTable(pIfTable unsafe.Pointer, pdwSize *uint32, bOrder bool) WinResult {
+	return procGetIfTable.Call(uintptr(pIfTable), uintptr(unsafe.Pointer(pdwSize)), boolToUintptr(bOrder))
+}
+
+// GetIpAddrTable retrieves the interface-to-IPv4 address mapping table.
+func GetIpAddrTable(pIpAddrTable unsafe.Pointer, pdwSize *uint32, bOrder bool) WinResult {
+	return procGetIPAddrTable.Call(uintptr(pIpAddrTable), uintptr(unsafe.Pointer(pdwSize)), boolToUintptr(bOrder))
+}
