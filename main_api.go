@@ -1235,6 +1235,9 @@ var (
 	// procLoadIcon  = user32.NewProc("LoadIconW")
 	procLoadIcon = NewBoundProc2(User32, "LoadIconW", CheckNull)
 
+	// procLoadImage = user32.NewProc("LoadImageW")
+	procLoadImageW = NewBoundProc6(User32, "LoadImageW", CheckNull)
+
 	// procUnregisterClassW = user32.NewProc("UnregisterClassW")
 	procUnregisterClassW = NewBoundProc2(User32, "UnregisterClassW", CheckBool)
 
@@ -4602,6 +4605,9 @@ const IDI_APPLICATION = 32512
 // Return values:
 //   - windows.Handle: Handle to the loaded icon (HICON).
 //   - WinResult: Call status and error details if the call fails.
+//
+// "LoadIconW defaults to loading the standard icon size (SM_CXICON / SM_CYICON, which is usually 32x32). However, the system tray uses the small icon size (SM_CXSMICON / SM_CYSMICON, usually 16x16)." - Gemini 3.1 Pro
+// so use LoadImage instead. "LoadImageW fixes this by letting you explicitly ask for the 16x16 size, which makes Windows pull the correct sub-image directly from your multi-resolution resource."
 func LoadIcon(hInstance windows.Handle, lpIconName *uint16) (windows.Handle, WinResult) {
 	res := procLoadIcon.Call(
 		uintptr(hInstance),
@@ -4648,18 +4654,56 @@ func LoadIconByID(hInstance windows.Handle, resourceID uint16) (windows.Handle, 
 	return windows.Handle(res.R1), res
 }
 
-// // LoadIconByName loads an icon using a string resource name.
-// func LoadIconByName(hInstance windows.Handle, name string) (windows.Handle, error) {
-// 	namePtr, err := windows.UTF16PtrFromString(name)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	res := procLoadIcon.Call(
-// 		uintptr(hInstance),
-// 		uintptr(unsafe.Pointer(namePtr)),
-// 	)
-// 	return windows.Handle(res.R1), nil
-// }
+const (
+	IMAGE_BITMAP = 0
+	IMAGE_ICON   = 1
+	IMAGE_CURSOR = 2
+
+	LR_DEFAULTCOLOR     = 0x00000000
+	LR_MONOCHROME       = 0x00000001
+	LR_COLOR            = 0x00000002
+	LR_COPYRETURNORG    = 0x00000004
+	LR_COPYDELETEORG    = 0x00000008
+	LR_LOADFROMFILE     = 0x00000010
+	LR_LOADTRANSPARENT  = 0x00000020
+	LR_DEFAULTSIZE      = 0x00000040
+	LR_VGACOLOR         = 0x00000080
+	LR_LOADMAP3DCOLORS  = 0x00001000
+	LR_CREATEDIBSECTION = 0x00002000
+	LR_COPYFROMRESOURCE = 0x00004000
+	LR_SHARED           = 0x00008000
+
+	SM_CXICON   = 11
+	SM_CYICON   = 12
+	SM_CXSMICON = 49
+	SM_CYSMICON = 50
+)
+
+// LoadImageByID loads an image (icon, cursor, or bitmap) using a numeric integer ID.
+//
+// Parameters:
+//   - hInstance: Handle to the module whose executable file contains the resource.
+//   - resourceID: The 16-bit numeric identifier of the resource.
+//   - uType: The type of image to be loaded (e.g., wincoe.IMAGE_ICON).
+//   - cx, cy: The desired width and height in pixels.
+//   - fuLoad: Load flags (e.g., wincoe.LR_SHARED).
+//
+// Return values:
+//   - windows.Handle: Handle to the loaded image.
+//   - WinResult: Call status and error details if the call fails.
+func LoadImageByID(hInstance windows.Handle, resourceID uint16, uType uint32, cx, cy int32, fuLoad uint32) (windows.Handle, WinResult) {
+	res := procLoadImageW.Call(
+		uintptr(hInstance),
+		uintptr(resourceID),
+		uintptr(uType),
+		// #nosec G115 -- safe: Win32 dimensions are sign-extended from int32 into uintptr
+		uintptr(cx),
+		// #nosec G115 -- safe: Win32 dimensions are sign-extended from int32 into uintptr
+		uintptr(cy),
+		uintptr(fuLoad),
+	)
+	return windows.Handle(res.R1), res
+}
 
 // UnregisterClassW unregisters a window class.
 func UnregisterClassW(lpClassName *uint16, hInstance windows.Handle) WinResult {
