@@ -424,7 +424,8 @@ func TestWinCall(t *testing.T) {
 					t.Errorf("Footgun detected: error is incorrectly 'Is' compatible with %v , in other words: unexpected: errors.Is(err, %v) == true", tt.expectNoIsErr, tt.expectNoIsErr)
 				}
 				// Skip res1.ErrIs if target is windows.ERROR_SUCCESS to avoid triggering the intentionally guarded bug logger warning
-				if tt.expectNoIsErr != windows.ERROR_SUCCESS && res1.ErrIs(tt.expectNoIsErr) {
+				if tt.expectNoIsErr != windows.ERROR_SUCCESS && // nolint:errorlint // we wanna do this
+					res1.ErrIs(tt.expectNoIsErr) {
 					t.Errorf("Footgun detected: error is incorrectly 'Is' compatible with %v , in other words: unexpected: errors.Is(err, %v) == true", tt.expectNoIsErr, tt.expectNoIsErr)
 				}
 			}
@@ -462,7 +463,7 @@ func TestWinCall(t *testing.T) {
 					}
 				}()
 
-				_ = WinCallN(mock, CheckBool)
+				_ = WinCallN(mock, CheckBool) //nolint:errcheck // don't care
 				// if we reach here the defer already failed the test
 			})
 		}
@@ -605,7 +606,7 @@ func TestRealProc2_NilDLLPanics(t *testing.T) {
 
 func TestWinCall_NilProcPanics(t *testing.T) {
 	assertPanics(t, func() {
-		WinCallN(nil, CheckBool)
+		_ = WinCallN(nil, CheckBool) //nolint:errcheck // don't care
 	})
 }
 
@@ -939,7 +940,8 @@ func TestWinCallFixedArities(t *testing.T) {
 				if errors.Is(res.Err, tt.expectNoIsErr) {
 					t.Errorf("[%s] Footgun: error incorrectly matches %v", arityName, tt.expectNoIsErr)
 				}
-				if tt.expectNoIsErr != windows.ERROR_SUCCESS && res.ErrIs(tt.expectNoIsErr) {
+				if tt.expectNoIsErr != windows.ERROR_SUCCESS && // nolint:errorlint // we wanna do this
+					res.ErrIs(tt.expectNoIsErr) {
 					t.Errorf("[%s] Footgun: error incorrectly matches %v", arityName, tt.expectNoIsErr)
 				}
 			}

@@ -36,7 +36,7 @@ type mockLazyProc4Bench struct{ name string }
 func (m *mockLazyProc4Bench) Name() string  { return m.name }
 func (m *mockLazyProc4Bench) Addr() uintptr { return 0 }
 func (m *mockLazyProc4Bench) Find() error   { return nil }
-func (m *mockLazyProc4Bench) Call(args ...uintptr) (uintptr, uintptr, error) {
+func (m *mockLazyProc4Bench) Call(_ ...uintptr) (uintptr, uintptr, error) {
 	return 1, 0, nil
 }
 
@@ -46,22 +46,22 @@ func (m *mockLazyProc4Bench) Call(args ...uintptr) (uintptr, uintptr, error) {
 
 // GetCurrentProcessId is a fast, user-mode API. Expects 0 allocations.
 func runArity0Real() {
-	procArity0.Call()
+	_ = procArity0.Call() //nolint:errcheck // don't care
 }
 
 // SetLastError is essentially instantaneous. Expects 0 allocations.
 func runArity1Real() {
-	procArity1.Call(0)
+	procArity1.Call(0) //nolint:errcheck // don't care
 }
 
 // WaitForSingleObject(0, 0) fails instantly (WAIT_FAILED) with zero pointers. Expects 0 allocations.
 func runArity2Real() {
-	procArity2.Call(0, 0)
+	procArity2.Call(0, 0) //nolint:errcheck // don't care
 }
 
 // MulDiv performs math on three integers. Zero pointers, zero heap allocations.
 func runArity3Real() {
-	procArity3.Call(10, 20, 30)
+	procArity3.Call(10, 20, 30) //nolint:errcheck // don't care
 }
 
 // We pass an invalid handle (0) to PeekConsoleInputW so it fails immediately
@@ -70,28 +70,28 @@ func runArity3Real() {
 func runArity4EscapedPointers() {
 	var rec inputRecord
 	var count uint32
-	procArity4Peek.Call(0, uintptr(unsafe.Pointer(&rec)), 1, uintptr(unsafe.Pointer(&count)))
+	procArity4Peek.Call(0, uintptr(unsafe.Pointer(&rec)), 1, uintptr(unsafe.Pointer(&count))) //nolint:errcheck // don't care
 }
 
 // PostThreadMessageW takes 4 scalar integer arguments, no pointers.
 func runArity4ScalarReal() {
-	procArity4Post.Call(0, 0, 0, 0)
+	procArity4Post.Call(0, 0, 0, 0) //nolint:errcheck // don't care
 }
 
 // Tests the exact same API as Arity1, but forced through the variadic args... wrapper.
 // This allocs the slice (1 alloc) and for each arg 8 bytes (in that same 1 alloc).
 func runArityNReal() {
-	procArityNReal.Call(0)
+	procArityNReal.Call(0) //nolint:errcheck // don't care
 }
 
 // SetLastError(0) -> errno = 0 (0 <= 255) => 0 allocs
 func runErrno0() {
-	procArity1.Call(0)
+	procArity1.Call(0) //nolint:errcheck // don't care
 }
 
 // SetLastError(87) -> errno = 87 (ERROR_INVALID_PARAMETER, 87 <= 255) => 0 allocs
 func runErrno87() {
-	procArity1.Call(87)
+	procArity1.Call(87) //nolint:errcheck // don't care
 }
 
 // SetLastError(1444) -> errno = 1444 (1444 >= 256) => 1 alloc (8 B/op)
@@ -99,7 +99,7 @@ func runErrno87() {
 // Returning error codes within this range costs zero heap allocations.
 // Only error codes >= 256 incur an 8-byte heap allocation to box the syscall.Errno integer into the error interface.
 func runErrno1444() {
-	procArity1.Call(1444)
+	procArity1.Call(1444) //nolint:errcheck // don't care
 }
 
 var tid uintptr
@@ -107,18 +107,18 @@ var tid uintptr
 // Success Case: Pass GetCurrentThreadId() => PostThreadMessageW succeeds (errno = 0)
 // Result: 0 allocs / 0 B/op
 func runArity4Success() {
-	procArity4Post.Call(tid, 0, 0, 0)
+	procArity4Post.Call(tid, 0, 0, 0) //nolint:errcheck // don't care
 }
 
 // Failure Case: Pass 0 => Fails with ERROR_INVALID_THREAD_ID (errno = 1444)
 // Result: 1 alloc / 8 B/op
 func runArity4Failure() {
-	procArity4Post.Call(0, 0, 0, 0)
+	procArity4Post.Call(0, 0, 0, 0) //nolint:errcheck // don't care
 }
 
 // Mocked variadic call: 24 bytes, 1 alloc (8 bytes per arg into variadic slice).
 func runMockedArityN() {
-	procMockedArityN.Call(0, 1, 2)
+	procMockedArityN.Call(0, 1, 2) //nolint:errcheck // don't care
 }
 
 // ============================================================================
@@ -288,7 +288,9 @@ func TestFirstCallHasZeroAllocations(t *testing.T) {
 				p := NewBoundProc0(Kernel32, "GetCurrentProcessId", CheckNone)
 
 				// Measure ONLY the .Call() execution, not the constructor
-				allocs := countFirstCallAllocs(func() { p.Call() })
+				allocs := countFirstCallAllocs(func() {
+					p.Call() //nolint:errcheck // don't care
+				})
 				if allocs != 0 {
 					t.Errorf("First call allocated %d times, expected 0", allocs)
 				}
@@ -298,7 +300,9 @@ func TestFirstCallHasZeroAllocations(t *testing.T) {
 			name: "Arity1_Errno0_FirstCall",
 			makeAndCall: func() {
 				p := NewBoundProc1(Kernel32, "SetLastError", CheckNone)
-				allocs := countFirstCallAllocs(func() { p.Call(0) })
+				allocs := countFirstCallAllocs(func() {
+					p.Call(0) //nolint:errcheck // don't care
+				})
 				if allocs != 0 {
 					t.Errorf("First call allocated %d times, expected 0", allocs)
 				}
@@ -371,7 +375,7 @@ func TestFirstCallHasZeroAllocations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			tt.makeAndCall()
 		})
 	}
