@@ -4619,15 +4619,17 @@ var IDI_APPLICATION_RESOURCE = MAKEINTRESOURCE(IDI_APPLICATION)
 // 3. Loading a Custom Icon by String Name:
 // iconNamePtr, _ := windows.UTF16PtrFromString("MY_ICON_RESOURCE")
 // hIcon2 := LoadIcon(hInstance, iconNamePtr)
-func LoadIcon(hInstance windows.Handle, lpIconName *uint16) WinResult {
+func LoadIcon(hInstance windows.Handle, lpIconName *uint16) (windows.Handle, WinResult) {
 	res := procLoadIcon.Call(
 		uintptr(hInstance),
 		uintptr(unsafe.Pointer(lpIconName)),
 	)
-	return res //windows.Handle(res.R1)
+	return windows.Handle(res.R1), res
 }
 
 // LoadIconByID loads an icon using an integer resource ID (e.g., IDI_APPLICATION).
+//
+// hInstance = 0 (NULL): Tells Windows "Look inside Windows' system DLLs for standard built-in icons" (like IDI_APPLICATION, IDI_WARNING, IDI_SHIELD).
 func LoadIconByID(hInstance windows.Handle, resourceID uint16) (windows.Handle, WinResult) {
 	res := procLoadIcon.Call(
 		uintptr(hInstance),
