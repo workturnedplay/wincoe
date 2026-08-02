@@ -5741,3 +5741,24 @@ func SetupDiCallClassInstaller(installFunction uint32, deviceInfoSet windows.Han
 		uintptr(unsafe.Pointer(deviceInfoData)),
 	)
 }
+
+var ReservedFileNames = map[string]struct{}{
+	"CON": {}, "PRN": {}, "AUX": {}, "NUL": {},
+	"COM1": {}, "COM2": {}, "COM3": {}, "COM4": {}, "COM5": {},
+	"COM6": {}, "COM7": {}, "COM8": {}, "COM9": {},
+	"LPT1": {}, "LPT2": {}, "LPT3": {}, "LPT4": {}, "LPT5": {},
+	"LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
+}
+
+// IsWindowsReservedFileName checks if a filename uses a Windows reserved device name.
+func IsWindowsReservedFileName(name string) bool {
+	// filepath.Base handles any directory prefix; TrimRight strips trailing
+	// dots and spaces that Windows itself strips before resolving the name.
+	baseName := strings.ToUpper(strings.TrimRight(filepath.Base(name), ". "))
+
+	if _, reserved := ReservedFileNames[baseName]; reserved {
+		return true
+	}
+
+	return false
+}
