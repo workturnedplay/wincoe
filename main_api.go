@@ -75,33 +75,32 @@ import (
 //
 // Keep the atomic pointer private so callers cannot store nil and violate
 // the package invariant. Use SetLogger and getLogger instead.
-var logger atomic.Pointer[slog.Logger]
-
-var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+var (
+	logger        atomic.Pointer[slog.Logger]
+	discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+)
 
 func init() {
+	// Guarantee baseline initialization before any goroutines spawn.
 	logger.Store(discardLogger)
 }
 
-// SetLogger atomically replaces the package-wide fallback logger.
-// A nil logger restores the discard logger rather than exposing nil to
-// concurrent readers.
+// SetLogger enforces the non-nil invariant at the mutation boundary.
 func SetLogger(l *slog.Logger) {
 	if l == nil {
-		l = discardLogger
+		// Defense-in-depth: Never allow a nil pointer into the atomic storage.
+		// Immediately swap to the discard logger to prevent downstream dereference panics.
+		logger.Store(discardLogger)
+		return
 	}
 	logger.Store(l)
 }
 
-// getLogger always returns a non-nil logger.
+// getLogger provides branchless, atomic read access.
+// By enforcing the invariant in SetLogger, the read path is stripped of overhead.
 func getLogger() *slog.Logger {
-	if l := logger.Load(); l != nil {
-		return l
-	}
-
-	// Defensive fallback in case memory corruption or a future refactor
-	// somehow violates SetLogger's non-nil invariant.
-	return discardLogger
+	// Guaranteed non-nil by init() and SetLogger().
+	return logger.Load()
 }
 
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
