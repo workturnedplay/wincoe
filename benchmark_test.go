@@ -25,8 +25,8 @@ var (
 	procArity4Post   = NewBoundProc4(User32, "PostThreadMessageW", CheckNone)
 	procArityNReal   = NewBoundProcN(Kernel32, "SetLastError", CheckNone)
 	procMockedArityN = &BoundProcN{
-		Proc:  &mockLazyProc4Bench{name: "MockedAPI"},
-		Check: CheckNone,
+		proc:  &mockLazyProc4Bench{name: "MockedAPI"},
+		check: CheckNone,
 	}
 )
 
