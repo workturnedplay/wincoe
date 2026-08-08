@@ -333,7 +333,7 @@ func main() {
 		IsVariadic:      true,
 	})
 
-	// 2. Loop through the fixed arities (0 to 9)
+	// 2. Loop through the fixed arities (0 to 12)
 	for i := 0; i <= 12; i++ {
 		var args, callArgs []string
 		for j := 1; j <= i; j++ {
