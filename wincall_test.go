@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -970,5 +971,60 @@ func TestWinCallFixedArities(t *testing.T) {
 			m := &mockLazyProc9{baseMock{name: "Mock9_" + tt.name, nextR1: tt.r1, nextErr: tt.callErr}}
 			assertRes(t, WinCall9(m, tt.isFailure, 1, 2, 3, 4, 5, 6, 7, 8, 9), "Arity9")
 		})
+	}
+}
+
+// TestLastErrorClearedBeforeEachSyscall is a focused regression test for the
+// invariant this package's error-handling design depends on: that Go's
+// syscall layer resets the calling thread's last-error state to 0
+// immediately before each raw syscall, and captures GetLastError()
+// atomically immediately afterward -- see
+// https://github.com/golang/go/issues/41220, cited throughout this
+// package's comments (CheckNullWithLastError, getWindowLongPtr's identical
+// caller-side pattern in winbollocks/main.go). CheckNullWithLastError
+// specifically depends on this to distinguish a legitimately-zero return
+// value from a real failure, so a wrong assumption here would silently
+// misclassify successes as failures (or vice versa) across every API bound
+// that way.
+//
+// Rather than resting entirely on that historical issue reference, this
+// exercises the behavior directly: it poisons the thread's last-error state
+// with an artificial, distinguishable value via a raw SetLastError call,
+// then invokes an unrelated API known to never call SetLastError on success
+// (GetCurrentProcessId -- already bound CheckNone elsewhere in this
+// package's benchmark_test.go on that exact assumption) and verifies the
+// resulting WinResult's captured CallStatus reads back as ERROR_SUCCESS
+// rather than the poisoned value.
+func TestLastErrorClearedBeforeEachSyscall(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// An arbitrary value that GetCurrentProcessId could never legitimately
+	// leave behind in GetLastError() itself.
+	const poisonedErrno = windows.Errno(0x1E0BAD)
+
+	procSetLastErrorRaw := Kernel32.NewProc("SetLastError")
+	if err := procSetLastErrorRaw.Find(); err != nil {
+		t.Fatalf("failed to resolve kernel32!SetLastError: %v", err)
+	}
+
+	procGetCurrentProcessIdForTest := NewBoundProc0(Kernel32, "GetCurrentProcessId", CheckNone)
+
+	const iterations = 5
+	for i := range iterations {
+		// Poison the thread-local last-error value immediately before the
+		// call under test.
+		if _, _, callErr := procSetLastErrorRaw.Call(uintptr(poisonedErrno)); callErr != nil && !errors.Is(callErr, windows.ERROR_SUCCESS) && !errors.Is(callErr, poisonedErrno) {
+			t.Fatalf("iteration %d: raw SetLastError call itself unexpectedly failed: %v", i, callErr) // yeah it is exactly poisonedErrno here!
+		}
+
+		res := procGetCurrentProcessIdForTest.Call() //here setlasterr(0) is internally called automatically by SyscallN(..) !
+		if !res.CallStatusIs(windows.ERROR_SUCCESS) {
+			t.Fatalf("iteration %d: expected GetCurrentProcessId's captured CallStatus to read as ERROR_SUCCESS "+
+				"(proving last-error was reset immediately before the call), got: %v -- this means Go's syscall "+
+				"layer did NOT reset last-error before the call the way this package's error-handling design "+
+				"(CheckNullWithLastError, CheckWinResult's r1-recovery path, etc.) assumes it always does",
+				i, res.CallStatus)
+		}
 	}
 }
