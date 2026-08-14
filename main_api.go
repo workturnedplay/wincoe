@@ -1459,10 +1459,10 @@ var (
 	//Per Win32 docs, GetSystemMetrics returns 0 for both "the queried value is legitimately 0" and "the index is invalid/unsupported" — it does not set GetLastError in any meaningful way for these system-metric indices.
 	procGetSystemMetrics = NewBoundProc1(User32, "GetSystemMetrics", CheckNone) // returns int, 0 on failure for most indices
 	procSetCursorPos     = NewBoundProc2(User32, "SetCursorPos", CheckBool)
-
 	// LoadCursorW returns a shared system cursor handle; failure is NULL.
-	// SetCursor returns the previous HCURSOR (0 is a legitimate prior value),
-	// so CheckNone — callers that care about the previous handle read R1.
+	// SetCursor returns the previous HCURSOR (0 is a legitimate prior value
+	// and does not set GetLastError), so CheckNone — the public wrapper
+	// returns that previous handle as windows.Handle, matching SetCapture.
 	procLoadCursorW = NewBoundProc2(User32, "LoadCursorW", CheckNull)
 	procSetCursor   = NewBoundProc1(User32, "SetCursor", CheckNone)
 
@@ -4990,7 +4990,7 @@ func LoadImageByID(hInstance windows.Handle, resourceID uint16, uType uint32, cx
 }
 
 // Standard system cursor resource IDs for LoadCursorW(NULL, MAKEINTRESOURCE(id)).
-// These are shared OS cursors — do not DestroyCursor them.
+// These are shared OS cursors owned by USER32 — never DestroyCursor or CloseHandle them.
 const (
 	IDC_ARROW       uintptr = 32512
 	IDC_IBEAM       uintptr = 32513
@@ -5009,20 +5009,29 @@ const (
 )
 
 // LoadCursor loads a cursor resource. Pass hInstance=0 and one of the IDC_*
-// constants to obtain a shared system cursor. The returned handle must not be
-// passed to DestroyCursor when loaded this way.
+// constants to obtain a shared system cursor.
+//
+// Ownership: cursors loaded from a system resource (hInstance=0 + IDC_*) or
+// from a module via LoadCursorW are shared and owned by the system. Do not
+// pass them to DestroyCursor, and do not pass them to CloseHandle either —
+// HCURSOR is a USER object, not a kernel HANDLE. DestroyCursor is only valid
+// for cursors you created yourself (CreateCursor / LoadCursorFromFile /
+// LoadImage without LR_SHARED).
 func LoadCursor(hInstance windows.Handle, resourceID uintptr) (windows.Handle, WinResult) {
 	res := procLoadCursorW.Call(uintptr(hInstance), resourceID)
 	return windows.Handle(res.R1), res
 }
 
-// SetCursor sets the system cursor shape for the calling thread's input
-// queue. Returns the previous cursor handle in R1 (may be 0). Callers that
-// only care about success/failure can ignore R1; CheckNone means Failed()
-// is never true for the API's own return convention, so callers should
-// still treat a NULL hCursor argument as a no-op before calling.
-func SetCursor(hCursor windows.Handle) WinResult {
-	return procSetCursor.Call(uintptr(hCursor))
+// SetCursor sets the cursor shape for the calling thread's input queue.
+//
+// Returns the handle of the previous cursor, or 0 if there was none.
+// SetCursor does not set GetLastError and treats a NULL previous cursor as a
+// normal outcome, so there is no WinResult — same pattern as SetCapture /
+// GetCapture. Callers that only need to force a shape (and do not restore the
+// previous one) can ignore the return value.
+func SetCursor(hCursor windows.Handle) (prevCursor windows.Handle) {
+	res := procSetCursor.Call(uintptr(hCursor))
+	return windows.Handle(res.R1)
 }
 
 // UnregisterClassW unregisters a window class.
