@@ -1473,6 +1473,9 @@ var (
 	procSetSystemCursor = NewBoundProc2(User32, "SetSystemCursor", CheckBool)
 	// SystemParametersInfoW: SPI_SETCURSORS restores all system cursors.
 	procSystemParametersInfoW = NewBoundProc4(User32, "SystemParametersInfoW", CheckBool)
+	// SetTimer returns the timer ID (non-zero) on success; 0 on failure.
+	procSetTimer  = NewBoundProc4(User32, "SetTimer", CheckZero)
+	procKillTimer = NewBoundProc2(User32, "KillTimer", CheckBool)
 
 	// procInvalidateRect = user32.NewProc("InvalidateRect")
 	procInvalidateRect = NewBoundProc3(User32, "InvalidateRect", CheckBool)
@@ -5095,6 +5098,22 @@ func SystemParametersInfo(uiAction, uiParam uint32, pvParam unsafe.Pointer, fWin
 		uintptr(fWinIni),
 	)
 }
+
+// SetTimer creates a periodic timer that posts WM_TIMER to hwnd.
+// nIDEvent is the timer ID; uElapse is the interval in milliseconds.
+// timerFunc must be 0 to receive WM_TIMER (non-null callback is not used here).
+func SetTimer(hwnd windows.Handle, nIDEvent uintptr, uElapse uint32, timerFunc uintptr) (id uintptr, res WinResult) {
+	res = procSetTimer.Call(uintptr(hwnd), nIDEvent, uintptr(uElapse), timerFunc)
+	return res.R1, res
+}
+
+// KillTimer stops a timer previously created with SetTimer.
+func KillTimer(hwnd windows.Handle, nIDEvent uintptr) WinResult {
+	return procKillTimer.Call(uintptr(hwnd), nIDEvent)
+}
+
+// WM_TIMER is posted to a window when a SetTimer interval elapses.
+const WM_TIMER = 0x0113
 
 // UnregisterClassW unregisters a window class.
 func UnregisterClassW(lpClassName *uint16, hInstance windows.Handle) WinResult {
