@@ -1460,6 +1460,12 @@ var (
 	procGetSystemMetrics = NewBoundProc1(User32, "GetSystemMetrics", CheckNone) // returns int, 0 on failure for most indices
 	procSetCursorPos     = NewBoundProc2(User32, "SetCursorPos", CheckBool)
 
+	// LoadCursorW returns a shared system cursor handle; failure is NULL.
+	// SetCursor returns the previous HCURSOR (0 is a legitimate prior value),
+	// so CheckNone — callers that care about the previous handle read R1.
+	procLoadCursorW = NewBoundProc2(User32, "LoadCursorW", CheckNull)
+	procSetCursor   = NewBoundProc1(User32, "SetCursor", CheckNone)
+
 	// procInvalidateRect = user32.NewProc("InvalidateRect")
 	procInvalidateRect = NewBoundProc3(User32, "InvalidateRect", CheckBool)
 
@@ -4981,6 +4987,42 @@ func LoadImageByID(hInstance windows.Handle, resourceID uint16, uType uint32, cx
 		uintptr(fuLoad),
 	)
 	return windows.Handle(res.R1), res
+}
+
+// Standard system cursor resource IDs for LoadCursorW(NULL, MAKEINTRESOURCE(id)).
+// These are shared OS cursors — do not DestroyCursor them.
+const (
+	IDC_ARROW       uintptr = 32512
+	IDC_IBEAM       uintptr = 32513
+	IDC_WAIT        uintptr = 32514
+	IDC_CROSS       uintptr = 32515
+	IDC_UPARROW     uintptr = 32516
+	IDC_SIZENWSE    uintptr = 32642 // diagonal \ (top-left / bottom-right)
+	IDC_SIZENESW    uintptr = 32643 // diagonal / (top-right / bottom-left)
+	IDC_SIZEWE      uintptr = 32644 // horizontal
+	IDC_SIZENS      uintptr = 32645 // vertical
+	IDC_SIZEALL     uintptr = 32646 // four-way (move / omnidirectional)
+	IDC_NO          uintptr = 32648
+	IDC_HAND        uintptr = 32649
+	IDC_APPSTARTING uintptr = 32650
+	IDC_HELP        uintptr = 32651
+)
+
+// LoadCursor loads a cursor resource. Pass hInstance=0 and one of the IDC_*
+// constants to obtain a shared system cursor. The returned handle must not be
+// passed to DestroyCursor when loaded this way.
+func LoadCursor(hInstance windows.Handle, resourceID uintptr) (windows.Handle, WinResult) {
+	res := procLoadCursorW.Call(uintptr(hInstance), resourceID)
+	return windows.Handle(res.R1), res
+}
+
+// SetCursor sets the system cursor shape for the calling thread's input
+// queue. Returns the previous cursor handle in R1 (may be 0). Callers that
+// only care about success/failure can ignore R1; CheckNone means Failed()
+// is never true for the API's own return convention, so callers should
+// still treat a NULL hCursor argument as a no-op before calling.
+func SetCursor(hCursor windows.Handle) WinResult {
+	return procSetCursor.Call(uintptr(hCursor))
 }
 
 // UnregisterClassW unregisters a window class.
