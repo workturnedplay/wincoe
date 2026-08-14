@@ -5612,8 +5612,12 @@ const (
 	WM_CONTEXTMENU = 0x007B // winxp won't have this tho
 
 	WM_NCLBUTTONDOWN = 0x00A1
+	// WM_SETCURSOR is sent to a window to set the cursor. LOWORD(lParam) is the
+	// hit-test code; return TRUE if the cursor was set (skip DefWindowProc).
+	WM_SETCURSOR = 0x0020
 
 	HTCAPTION = 2
+	HTCLIENT  = 1
 )
 
 const (
