@@ -1465,6 +1465,14 @@ var (
 	// returns that previous handle as windows.Handle, matching SetCapture.
 	procLoadCursorW = NewBoundProc2(User32, "LoadCursorW", CheckNull)
 	procSetCursor   = NewBoundProc1(User32, "SetCursor", CheckNone)
+	// CopyIcon duplicates an icon/cursor; needed before SetSystemCursor, which
+	// destroys the handle it is given. Shared LoadCursor handles must not be
+	// passed to SetSystemCursor directly.
+	procCopyIcon = NewBoundProc1(User32, "CopyIcon", CheckNull)
+	// SetSystemCursor replaces a system cursor (OCR_*) globally. CheckBool.
+	procSetSystemCursor = NewBoundProc2(User32, "SetSystemCursor", CheckBool)
+	// SystemParametersInfoW: SPI_SETCURSORS restores all system cursors.
+	procSystemParametersInfoW = NewBoundProc4(User32, "SystemParametersInfoW", CheckBool)
 
 	// procInvalidateRect = user32.NewProc("InvalidateRect")
 	procInvalidateRect = NewBoundProc3(User32, "InvalidateRect", CheckBool)
@@ -5029,9 +5037,63 @@ func LoadCursor(hInstance windows.Handle, resourceID uintptr) (windows.Handle, W
 // normal outcome, so there is no WinResult — same pattern as SetCapture /
 // GetCapture. Callers that only need to force a shape (and do not restore the
 // previous one) can ignore the return value.
+//
+// Thread-affinity: has no effect unless the mouse is over a window of the
+// calling thread or the calling thread holds mouse capture. To force a shape
+// while the cursor is over another process's window, use SetSystemCursor.
 func SetCursor(hCursor windows.Handle) (prevCursor windows.Handle) {
 	res := procSetCursor.Call(uintptr(hCursor))
 	return windows.Handle(res.R1)
+}
+
+// System cursor IDs for SetSystemCursor (OCR_*). OCR_NORMAL is the standard
+// arrow — replacing it makes every app that loads IDC_ARROW show your cursor.
+const (
+	OCR_NORMAL      uint32 = 32512
+	OCR_IBEAM       uint32 = 32513
+	OCR_WAIT        uint32 = 32514
+	OCR_CROSS       uint32 = 32515
+	OCR_UP          uint32 = 32516
+	OCR_SIZENWSE    uint32 = 32642
+	OCR_SIZENESW    uint32 = 32643
+	OCR_SIZEWE      uint32 = 32644
+	OCR_SIZENS      uint32 = 32645
+	OCR_SIZEALL     uint32 = 32646
+	OCR_NO          uint32 = 32648
+	OCR_HAND        uint32 = 32649
+	OCR_APPSTARTING uint32 = 32650
+)
+
+// SPI_SETCURSORS reloads all system cursors from the registry / defaults.
+// Pass to SystemParametersInfo after SetSystemCursor to undo replacements.
+const SPI_SETCURSORS uint32 = 0x0057
+
+// CopyIcon creates a private duplicate of an icon or cursor. Required before
+// SetSystemCursor: that API destroys the handle it receives, so a shared
+// LoadCursor handle must never be passed to it directly.
+func CopyIcon(h windows.Handle) (windows.Handle, WinResult) {
+	res := procCopyIcon.Call(uintptr(h))
+	return windows.Handle(res.R1), res
+}
+
+// SetSystemCursor replaces the system-wide cursor identified by id (OCR_*)
+// with hcur. The system takes ownership of hcur and destroys it — pass only
+// a CopyIcon/CreateCursor/LoadCursorFromFile handle, never a shared
+// LoadCursor result. To restore defaults, call SystemParametersInfo with
+// SPI_SETCURSORS (not another SetSystemCursor).
+func SetSystemCursor(hcur windows.Handle, id uint32) WinResult {
+	return procSetSystemCursor.Call(uintptr(hcur), uintptr(id))
+}
+
+// SystemParametersInfo wraps SystemParametersInfoW.
+// For SPI_SETCURSORS: uiParam=0, pvParam=nil, fWinIni=0.
+func SystemParametersInfo(uiAction, uiParam uint32, pvParam unsafe.Pointer, fWinIni uint32) WinResult {
+	return procSystemParametersInfoW.Call(
+		uintptr(uiAction),
+		uintptr(uiParam),
+		uintptr(pvParam),
+		uintptr(fWinIni),
+	)
 }
 
 // UnregisterClassW unregisters a window class.
