@@ -279,11 +279,11 @@ func countFirstCallAllocs(callFirstTime func()) uint64 {
 func TestFirstCallHasZeroAllocations(t *testing.T) {
 	tests := []struct {
 		name        string
-		makeAndCall func()
+		makeAndCall func(t *testing.T)
 	}{
 		{
 			name: "Arity0_FirstCall",
-			makeAndCall: func() {
+			makeAndCall: func(t *testing.T) {
 				// Construct fresh -> Call() #1
 				p := NewBoundProc0(Kernel32, "GetCurrentProcessId", CheckNone)
 
@@ -298,7 +298,7 @@ func TestFirstCallHasZeroAllocations(t *testing.T) {
 		},
 		{
 			name: "Arity1_Errno0_FirstCall",
-			makeAndCall: func() {
+			makeAndCall: func(t *testing.T) {
 				p := NewBoundProc1(Kernel32, "SetLastError", CheckNone)
 				allocs := countFirstCallAllocs(func() {
 					p.Call(0) //nolint:errcheck // don't care
@@ -326,57 +326,42 @@ func TestFirstCallHasZeroAllocations(t *testing.T) {
 		// },
 		{
 			name: "Arity4_Success_FirstCall",
-			makeAndCall: func() {
-				// 1. Lock this goroutine to a specific OS thread
+			makeAndCall: func(t *testing.T) {
+				// Lock this goroutine to a specific OS thread.
 				runtime.LockOSThread()
 				defer runtime.UnlockOSThread()
 
-				p := NewBoundProc4(User32, "PostThreadMessageW", CheckNone)
-				tid := uintptr(windows.GetCurrentThreadId())
+				threadID := uintptr(windows.GetCurrentThreadId())
 
-				// // Force Windows to create the thread's message queue upfront
-				// // so Call #1 of p.Call does not fail with errno 1444
-				// var msg windows.MSG
-				// windows.PeekMessage(&msg, 0, 0, 0, 0)
-
-				// // Force Windows to create the thread's message queue BEFORE measuring Call #1
-				// ret1 := p.Call(tid, 0, 0, 0)
-				// if ret1.R1 == 0 { //ret.Failed() {
-				// 	t.Logf("failed with %d and callStatus:%v", ret1.R1, ret1.CallStatus)
-				// }
-
-				var ret2 WinResult
-				allocs := countFirstCallAllocs(func() {
-					ret2 = p.Call(tid, 0, 0, 0)
-					// if ret2.R1 == 0 { //ret.Failed() {
-					// 	t.Logf("failed with %d and callStatus:%v", ret2.R1, ret2.CallStatus)
-					// }
-					// _ = ret2
-				})
-				if ret2.R1 == 0 {
-					t.Logf("%s: Call failed unexpectedly with R1:%d status:%v", t.Name(), ret2.R1, ret2.CallStatus)
+				// Warm up THREAD-level user32 state using a SEPARATE proc
+				// instance, so one-time per-thread initialization (which can
+				// leave a last-error >= 256 behind, boxed into an error
+				// interface = 1 alloc) is kept out of the measurement, while
+				// the proc measured below still gets a genuine first Call().
+				warm := NewBoundProc4(User32, "PostThreadMessageW", CheckNone)
+				if res := warm.Call(threadID, 0, 0, 0); res.R1 == 0 {
+					t.Logf("warm-up PostThreadMessageW failed: R1:%d status:%v", res.R1, res.CallStatus)
 				}
-				// t.Error("on purpose")
 
-				// // SetRect(lprc, left, top, right, bottom) - User32 scalar call that never fails
-				// p := NewBoundProc4(User32, "SetRect", CheckNone)
+				p := NewBoundProc4(User32, "PostThreadMessageW", CheckNone)
 
-				// // Pass 0 for rect pointer or valid dummy stack rect
-				// var rect windows.Rect
-				// allocs := countFirstCallAllocs(func() {
-				// 	p.Call(uintptr(unsafe.Pointer(&rect)), 0, 0, 100, 100)
-				// })
-
+				var res WinResult
+				allocs := countFirstCallAllocs(func() {
+					res = p.Call(threadID, 0, 0, 0)
+				})
+				if res.R1 == 0 {
+					t.Logf("Call failed unexpectedly with R1:%d status:%v", res.R1, res.CallStatus)
+				}
 				if allocs != 0 {
-					t.Errorf("First call allocated %d times, expected 0", allocs)
+					t.Errorf("First call allocated %d times, expected 0 (R1:%d CallStatus:%v)", allocs, res.R1, res.CallStatus)
 				}
 			},
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(_ *testing.T) {
-			tt.makeAndCall()
+		t.Run(tt.name, func(t *testing.T) {
+			tt.makeAndCall(t)
 		})
 	}
 }
