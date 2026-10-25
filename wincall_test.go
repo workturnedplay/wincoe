@@ -248,6 +248,12 @@ var tests = []struct {
 		wantErr:   true,
 	},
 	{
+		name:      "CheckMinusOne Failure (r1=-1 zero-extended, as a 32-bit GetMessage result arrives on amd64)",
+		isFailure: CheckMinusOne,
+		r1:        0xFFFFFFFF,
+		wantErr:   true,
+	},
+	{
 		name:      "CheckMinusOne Success (r1=0)",
 		isFailure: CheckMinusOne,
 		r1:        0,
