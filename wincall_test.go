@@ -156,6 +156,21 @@ var winCheckCases = []struct {
 		wantErr:   true,
 	},
 	{
+		name:        "HRESULT_FROM_WIN32 Failure maps back to its Win32 errno (E_ACCESSDENIED)",
+		isFailure:   CheckHRESULT,
+		r1:          uintptr(0x80070005),
+		callErr:     nil,
+		wantErr:     true,
+		expectIsErr: windows.ERROR_ACCESS_DENIED,
+	},
+	{
+		name:      "Handle Failure (r1=-1, callErr=nil) is not misreported as an errno",
+		isFailure: CheckHandle,
+		r1:        ^uintptr(0),
+		callErr:   nil,
+		wantErr:   true,
+	},
+	{
 		name:      "HRESULT Success (S_OK)",
 		isFailure: CheckHRESULT,
 		r1:        0,
@@ -1030,4 +1045,51 @@ func TestLastErrorClearedBeforeEachSyscall(t *testing.T) {
 				i, res.CallStatus)
 		}
 	}
+}
+
+func TestErrnoFromR1(t *testing.T) {
+	tests := []struct {
+		name   string
+		r1     uintptr
+		want   windows.Errno
+		wantOK bool
+	}{
+		{"zero", 0, 0, false},
+		{"plain win32 code", 122, windows.ERROR_INSUFFICIENT_BUFFER, true},
+		{"largest plain code", 0xFFFF, windows.Errno(0xFFFF), true},
+		{"HRESULT_FROM_WIN32", 0x80070005, windows.ERROR_ACCESS_DENIED, true},
+		{"HRESULT_FROM_WIN32 sign-extended", 0xFFFFFFFF80070005, windows.ERROR_ACCESS_DENIED, true},
+		{"E_FAIL", 0x80004005, 0, false},
+		{"NTSTATUS", 0xC0000022, 0, false},
+		{"minus one", ^uintptr(0), 0, false},
+		{"zero-extended minus one", 0xFFFFFFFF, 0, false},
+		{"arbitrary large", 123456, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := errnoFromR1(tt.r1)
+			if ok != tt.wantOK || got != tt.want {
+				t.Fatalf("errnoFromR1(0x%X) = (%v, %v), want (%v, %v)", tt.r1, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestCheckWinResult_NonErrnoR1IsNotMisreportedAsErrno(t *testing.T) {
+	alwaysFails := WinCheckFunc(func(uintptr, error) bool { return true })
+	for _, r1 := range []uintptr{^uintptr(0), 0xFFFFFFFF, 0x80004005, 0xC0000022, 123456} {
+		err := CheckWinResult("x", alwaysFails, r1, nil)
+		if err == nil {
+			t.Fatalf("r1=0x%X: expected an error", r1)
+		}
+		if errno, ok := errors.AsType[windows.Errno](err); ok {
+			t.Errorf("r1=0x%X was misreported as errno %d: %v", r1, uintptr(errno), err)
+		}
+	}
+}
+
+func TestCheckWinResult_NilCheckPanics(t *testing.T) {
+	assertPanicsWith(t, "nil WinCheckFunc", func() {
+		_ = CheckWinResult("x", nil, 0, nil) //nolint:errcheck // it panics
+	})
 }
