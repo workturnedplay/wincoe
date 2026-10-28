@@ -1,5 +1,4 @@
-//go:build windows
-// +build windows
+//go:build windows && amd64
 
 // Copyright 2026 workturnedplay
 //
@@ -84,7 +83,7 @@ func (m *mockLazyProc9) Call(a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) (uintpt
 }
 
 // Define the cases we want to cover
-var tests = []struct {
+var winCheckCases = []struct {
 	name          string
 	isFailure     WinCheckFunc
 	r1            uintptr
@@ -341,7 +340,7 @@ var tests = []struct {
 }
 
 func TestCheckWinResult(t *testing.T) {
-	for _, tt := range tests {
+	for _, tt := range winCheckCases {
 		t.Run(tt.name, func(t *testing.T) {
 			err := CheckWinResult(tt.name, tt.isFailure, tt.r1, tt.callErr)
 			failed := err != nil
@@ -388,7 +387,7 @@ func TestCheckWinResult(t *testing.T) {
 }
 
 func TestWinCall(t *testing.T) {
-	for _, tt := range tests {
+	for _, tt := range winCheckCases {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockLazyProc{
 				name:    "Mock" + tt.name, // helps debugging
@@ -455,23 +454,9 @@ func TestWinCall(t *testing.T) {
 					nextErr: windows.ERROR_ACCESS_DENIED,
 				}
 
-				defer func() {
-					r := recover()
-					if r == nil {
-						t.Fatal("expected panic, got none")
-					}
-					// optional: assert the exact message if you want stricter checking
-					msg, ok := r.(string)
-					if !ok {
-						t.Fatalf("expected string panic, got %T: %v", r, r)
-					}
-					if !strings.Contains(msg, "empty name in proc") {
-						t.Errorf("procName=%q: unexpected panic message: %q", tt.procName, msg)
-					}
-				}()
-
-				_ = WinCallN(mock, CheckBool) //nolint:errcheck // don't care
-				// if we reach here the defer already failed the test
+				assertPanicsWith(t, "empty name in proc", func() {
+					_ = WinCallN(mock, CheckBool) //nolint:errcheck // don't care
+				})
 			})
 		}
 	})
@@ -593,16 +578,34 @@ func TestWinResult_Methods(t *testing.T) {
 	}
 }
 
-func assertPanics(t *testing.T, fn func()) {
+// assertPanicsWith asserts fn panics with a string panic value containing wantSubstr
+// (an empty wantSubstr accepts any panic value).
+func assertPanicsWith(t *testing.T, wantSubstr string, fn func()) {
 	t.Helper()
 
 	defer func() {
-		if recover() == nil {
+		r := recover()
+		if r == nil {
 			t.Fatal("expected panic")
+		}
+		if wantSubstr == "" {
+			return
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected string panic, got %T: %v", r, r)
+		}
+		if !strings.Contains(msg, wantSubstr) {
+			t.Errorf("unexpected panic message %q, want it to contain %q", msg, wantSubstr)
 		}
 	}()
 
 	fn()
+}
+
+func assertPanics(t *testing.T, fn func()) {
+	t.Helper()
+	assertPanicsWith(t, "", fn)
 }
 
 func TestRealProc2_NilDLLPanics(t *testing.T) {
@@ -633,12 +636,12 @@ func TestBoolToUintptr(t *testing.T) {
 	}
 }
 
-func TestRealProc2_EmptyNamePanics(t *testing.T) { //it panics only because these cannot be found! not because empty/whitespace name!
+func TestRealProc2_EmptyNamePanics(t *testing.T) { // validateProcNameString rejects empty/whitespace-only names before any lookup
 	dll := windows.NewLazySystemDLL("kernel32.dll")
 
 	for _, name := range []string{"", " ", "\t", "\n"} {
 		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
-			assertPanics(t, func() {
+			assertPanicsWith(t, "empty procedure name", func() {
 				MustLoadProcN(dll, name)
 			})
 		})
@@ -765,12 +768,6 @@ func TestGetLoggerOrFallback_UninitializedAtomic(t *testing.T) {
 }
 
 func TestCheckEquals(t *testing.T) {
-	const (
-		// Pseudo-handles mimicking the ones in main.go
-		CURRENT_PROCESS_PSEUDO_HANDLE = ^uintptr(0)
-		CURRENT_THREAD_PSEUDO_HANDLE  = ^uintptr(1)
-	)
-
 	checkProcess := CheckEquals(CURRENT_PROCESS_PSEUDO_HANDLE)
 	checkThread := CheckEquals(CURRENT_THREAD_PSEUDO_HANDLE)
 
@@ -923,8 +920,8 @@ func TestGetServiceNamesFromPIDUncached(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestWinCallFixedArities(t *testing.T) {
-	// Re-use the existing 'tests' table defined at the top of the file
-	for _, tt := range tests {
+	// Re-use the existing 'winCheckCases' table defined at the top of the file
+	for _, tt := range winCheckCases {
 		// Inline helper to assert results cleanly without redefining the struct type
 		assertRes := func(t *testing.T, res WinResult, arityName string) {
 			t.Helper()

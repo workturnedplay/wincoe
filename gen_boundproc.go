@@ -164,6 +164,14 @@ type BoundProc{{.Suffix}} struct {
 	check WinCheckFunc
 }
 
+// assertInitialized panics (via panic2, so it gets logged) if b is nil or was not created through
+// NewBoundProc{{.Suffix}}/NewLazyBoundProc{{.Suffix}} (ie. it's a zero value with nil proc/check).
+func (b *BoundProc{{.Suffix}}) assertInitialized(who string) {
+	if b == nil || b.proc == nil || b.check == nil {
+		panic2("BoundProc{{.Suffix}}." + who + ": uninitialized BoundProc{{.Suffix}}, it must be created via NewBoundProc{{.Suffix}} or NewLazyBoundProc{{.Suffix}}")
+	}
+}
+
 // Call executes the underlying Windows procedure with the provided arguments.
 //
 {{if .EscapeDirective}}// SECURITY WARNING: This method uses the {{.EscapeDirective}} compiler directive.
@@ -187,12 +195,14 @@ type BoundProc{{.Suffix}} struct {
 {{end}}//
 {{if .EscapeDirective}}{{.EscapeDirective}}
 {{end}}func (b *BoundProc{{.Suffix}}) Call({{.InterfaceArgs}}) WinResult {
+	b.assertInitialized("Call")
 	return internalWinCall{{.Suffix}}(b.proc, b.check{{if .CallArgs}}, {{.CallArgs}}{{end}})
 }
 
 // Find attempts to locate the procedure in the DLL.
 // Returns nil if the procedure is successfully found, or an error if it is not.
 func (b *BoundProc{{.Suffix}}) Find() error {
+	b.assertInitialized("Find")
 	if err := b.proc.Find(); err != nil {
 		return fmt.Errorf("BoundProc{{.Suffix}}:Find says that LazyProcishWrapperForMocks{{.Suffix}}/LazyProc.Find() failed, err: %w", err)
 	}
@@ -269,7 +279,7 @@ func NewLazyBoundProc{{.Suffix}}(dll *windows.LazyDLL, name string, check WinChe
 	// if name != pname {
 	// 	panic2(fmt.Sprintf("BUG: proc name %q is different than validated proc name %q and it didn't fail earlier!", pname, name))
 	// }
-	return internalWinCall{{.Suffix}}(proc, check, {{.CallArgs}})
+	return internalWinCall{{.Suffix}}(proc, check{{if .CallArgs}}, {{.CallArgs}}{{end}})
 }
 
 {{.EscapeDirective}}
@@ -385,11 +395,6 @@ func main() {
 
 	// Format the generated code natively so it's clean
 	formatted, err := format.Source(buf.Bytes())
-	// if err != nil {
-	// 	fmt.Println("Code generation succeeded but formatting failed. Check the syntax.")
-	// 	os.WriteFile("boundproc_gen.go", buf.Bytes(), 0644)
-	// 	panic(err)
-	// }
 	if err != nil {
 		const diagnosticPath = "boundproc_gen.unformatted.go.txt"
 		writeErr := writeFileAtomically(diagnosticPath, buf.Bytes(), 0o644)
